@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.auth import CurrentUser
 from app.schemas import (
-    CycleCreate, CycleRead, IssueCreate, IssueRead, IssueUpdate,
+    CycleCreate, CycleRead, IssueActivityRead, IssueCommentCreate, IssueCreate, IssueRead, IssueUpdate,
     LabelCreate, LabelRead, WorkflowStateRead,
 )
 from app.services.issue_service import (
@@ -119,6 +119,32 @@ def update_issue(workspace_id: str, key: str, payload: IssueUpdate, current_user
             *service.update_issue(current_user, workspace_id, key.upper(), payload.model_dump(exclude_unset=True)),
         )
     except (IssueNotFound, IssueForbidden, IssueConflict, IssueValidationError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/workspaces/{workspace_id}/issues/{key}/activity", response_model=list[IssueActivityRead])
+def issue_activity(workspace_id: str, key: str, current_user: CurrentUser, service: IssueServiceDep):
+    try:
+        return service.activity(current_user, workspace_id, key.upper())
+    except (IssueNotFound, IssueForbidden) as exc:
+        raise _error(exc) from exc
+
+
+@router.post(
+    "/workspaces/{workspace_id}/issues/{key}/comments",
+    response_model=IssueActivityRead,
+    status_code=201,
+)
+def create_issue_comment(
+    workspace_id: str,
+    key: str,
+    payload: IssueCommentCreate,
+    current_user: CurrentUser,
+    service: IssueServiceDep,
+):
+    try:
+        return service.add_comment(current_user, workspace_id, key.upper(), payload.body)
+    except (IssueNotFound, IssueForbidden, IssueValidationError) as exc:
         raise _error(exc) from exc
 
 

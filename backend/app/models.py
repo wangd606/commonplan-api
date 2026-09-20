@@ -215,3 +215,32 @@ class IssueLabel(Base):
 
     issue_id: Mapped[str] = mapped_column(String(36), ForeignKey("issues.id", ondelete="CASCADE"), primary_key=True)
     label_id: Mapped[str] = mapped_column(String(36), ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True)
+
+
+class IssueComment(Base):
+    __tablename__ = "issue_comments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    issue_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("issues.id", ondelete="CASCADE"), index=True
+    )
+    author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IssueEvent(Base):
+    __tablename__ = "issue_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    issue_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("issues.id", ondelete="CASCADE"), index=True
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64))
+    changes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import DbSession
-from app.models import Cycle, Issue, IssueLabel, Label, Team, WorkflowState
+from app.models import Cycle, Issue, IssueComment, IssueEvent, IssueLabel, Label, Team, User, WorkflowState
 
 
 class IssueRepository(Protocol):
@@ -22,6 +22,9 @@ class IssueRepository(Protocol):
     def issues(self, team_id: str, **filters) -> list[Issue]: ...
     def issue_labels(self, issue_id: str) -> list[Label]: ...
     def replace_labels(self, issue_id: str, label_ids: list[str]) -> None: ...
+    def comments(self, issue_id: str) -> list[IssueComment]: ...
+    def events(self, issue_id: str) -> list[IssueEvent]: ...
+    def user(self, user_id: int | None) -> User | None: ...
     def add(self, record: object) -> None: ...
     def commit(self) -> None: ...
     def refresh(self, record: object) -> None: ...
@@ -81,6 +84,23 @@ class SqlAlchemyIssueRepository:
         self.db.query(IssueLabel).filter(IssueLabel.issue_id == issue_id).delete(synchronize_session=False)
         for label_id in label_ids:
             self.db.add(IssueLabel(issue_id=issue_id, label_id=label_id))
+
+    def comments(self, issue_id: str) -> list[IssueComment]:
+        return list(self.db.scalars(
+            select(IssueComment)
+            .where(IssueComment.issue_id == issue_id, IssueComment.deleted_at.is_(None))
+            .order_by(IssueComment.created_at, IssueComment.id)
+        ))
+
+    def events(self, issue_id: str) -> list[IssueEvent]:
+        return list(self.db.scalars(
+            select(IssueEvent)
+            .where(IssueEvent.issue_id == issue_id)
+            .order_by(IssueEvent.created_at, IssueEvent.id)
+        ))
+
+    def user(self, user_id: int | None) -> User | None:
+        return self.db.get(User, user_id) if user_id is not None else None
 
     def add(self, record: object) -> None:
         self.db.add(record)

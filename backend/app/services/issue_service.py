@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Cycle, Issue, Label, User
+from app.models import Cycle, Issue, IssueComment, IssueEvent, Label, User
 from app.repositories.issue_repository import IssueRepository, IssueRepositoryDep
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
 
@@ -84,6 +84,12 @@ class IssueService:
         self.repository.add(issue)
         self.repository.db.flush()
         self.repository.replace_labels(issue.id, values.get("label_ids", []))
+        self._event(
+            issue,
+            user,
+            "issue.created",
+            {"key": issue.key, "title": issue.title},
+        )
         self._commit()
         self.repository.refresh(issue)
         return issue, self.repository.issue_labels(issue.id)
@@ -104,20 +110,66 @@ class IssueService:
         if issue.version != expected_version:
             raise IssueConflict("Issue changed since it was loaded")
         label_ids = changes.pop("label_ids", None)
+        old_label_ids = [label.id for label in self.repository.issue_labels(issue.id)]
         state_id = changes.get("workflow_state_id")
         if state_id is not None:
             state = self.repository.state(state_id)
             if state is None or state.team_id != issue.team_id:
                 raise IssueValidationError("Workflow state must belong to the selected team")
         self._validate_refs(issue.team_id, changes.get("assignee_user_id"), changes.get("cycle_id"), label_ids or [])
+        event_changes = {}
         for field, value in changes.items():
+            old_value = getattr(issue, field)
+            if old_value != value:
+                event_changes[field] = {
+                    "from": self._json_value(old_value),
+                    "to": self._json_value(value),
+                }
             setattr(issue, field, value.strip() if field == "title" and isinstance(value, str) else value)
         if label_ids is not None:
             self.repository.replace_labels(issue.id, label_ids)
+            if old_label_ids != label_ids:
+                event_changes["label_ids"] = {"from": old_label_ids, "to": label_ids}
         issue.version += 1
+        if event_changes:
+            self._event(issue, user, "issue.updated", {"fields": event_changes})
         self._commit()
         self.repository.refresh(issue)
         return issue, self.repository.issue_labels(issue.id)
+
+    def add_comment(self, user: User, workspace_id: str, key: str, body: str):
+        issue = self.repository.issue(workspace_id, key)
+        if issue is None:
+            raise IssueNotFound
+        self._access(user, workspace_id, issue.team_id)
+        if not body.strip():
+            raise IssueValidationError("Comment cannot be empty")
+        comment = IssueComment(
+            id=str(uuid.uuid4()),
+            issue_id=issue.id,
+            author_user_id=user.id,
+            body=body.strip(),
+        )
+        self.repository.add(comment)
+        self.repository.db.flush()
+        self._event(
+            issue,
+            user,
+            "comment.created",
+            {"comment_id": comment.id},
+        )
+        self._commit()
+        self.repository.refresh(comment)
+        return self._comment_activity(comment)
+
+    def activity(self, user: User, workspace_id: str, key: str):
+        issue = self.repository.issue(workspace_id, key)
+        if issue is None:
+            raise IssueNotFound
+        self._access(user, workspace_id, issue.team_id)
+        rows = [self._comment_activity(comment) for comment in self.repository.comments(issue.id)]
+        rows.extend(self._event_activity(event) for event in self.repository.events(issue.id))
+        return sorted(rows, key=lambda row: (row["created_at"], row["id"]))
 
     def my_issues(self, user: User, workspace_id: str | None = None):
         from sqlalchemy import select
@@ -196,6 +248,47 @@ class IssueService:
             label = self.repository.label(label_id)
             if label is None or label.team_id != team_id:
                 raise IssueValidationError("Label must belong to the selected team")
+
+    def _event(self, issue: Issue, user: User | None, event_type: str, changes: dict):
+        self.repository.add(IssueEvent(
+            id=str(uuid.uuid4()),
+            issue_id=issue.id,
+            actor_user_id=user.id if user else None,
+            event_type=event_type,
+            changes={"schema_version": 1, **changes},
+        ))
+
+    def _comment_activity(self, comment: IssueComment):
+        author = self.repository.user(comment.author_user_id)
+        return {
+            "id": comment.id,
+            "kind": "comment",
+            "actor_user_id": comment.author_user_id,
+            "actor_name": author.name if author else None,
+            "body": comment.body,
+            "event_type": None,
+            "changes": {},
+            "created_at": comment.created_at,
+            "edited_at": comment.edited_at,
+        }
+
+    def _event_activity(self, event: IssueEvent):
+        actor = self.repository.user(event.actor_user_id)
+        return {
+            "id": event.id,
+            "kind": "event",
+            "actor_user_id": event.actor_user_id,
+            "actor_name": actor.name if actor else None,
+            "body": None,
+            "event_type": event.event_type,
+            "changes": event.changes,
+            "created_at": event.created_at,
+            "edited_at": None,
+        }
+
+    @staticmethod
+    def _json_value(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
 
     def _commit(self):
         try:

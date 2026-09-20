@@ -198,6 +198,8 @@ def test_bff_rejects_cross_site_auth_requests_and_clears_invalid_session():
         ("get", "/api/v1/workspaces/workspace-1/teams/team-1/labels", None),
         ("get", "/api/v1/workspaces/workspace-1/teams/team-1/issues", None),
         ("get", "/api/v1/workspaces/workspace-1/issues/CORE-1", None),
+        ("get", "/api/v1/workspaces/workspace-1/issues/CORE-1/activity", None),
+        ("post", "/api/v1/workspaces/workspace-1/issues/CORE-1/comments", {"body": "Hello"}),
         ("get", "/api/v1/me/issues", None),
     ],
 )

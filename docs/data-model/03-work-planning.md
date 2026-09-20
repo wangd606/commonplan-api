@@ -151,7 +151,23 @@ Allocate `issues.number` by locking the owning `teams` row and incrementing `nex
 | `GET/POST /api/v1/workspaces/{w}/teams/{t}/issues` | Cursor list with status, priority, assignee, project, cycle, label, due-date filters; create returns immutable key. |
 | `GET/PATCH /api/v1/workspaces/{w}/issues/{key}` | Detail and mutation; response includes properties, labels, sub-issues, PR links. `PATCH` requires the last seen `version`; stale writes return 409. |
 | `POST /api/v1/workspaces/{w}/issues/{key}/comments` | Add comment and timeline event transactionally. |
-| `GET /api/v1/workspaces/{w}/issues/{key}/activity` | Cursor-paginated comments and events in chronological order. |
+| `GET /api/v1/workspaces/{w}/issues/{key}/activity` | Comments and events in stable chronological order. M2 returns the full stream; introduce cursor pagination before production-scale histories. |
 | `GET /api/v1/me/issues` | My issues across all teams the caller belongs to, with optional workspace filter. |
 
 Creation takes a team from the route, **never** from an untrusted body field. Project/cycle/milestone/parent IDs are checked against that team before commit. Deleting a project should archive it, not cascade-delete its issues; existing issues can retain an archived project reference for history.
+
+## Issue detail product contract
+
+Issue detail is a first-class page, not a small list-side editor. Its canonical client route is `/workspaces/{workspaceId}/issues/{key}`. The route must be refresh-safe, shareable among authorized members, and participate in browser back/forward navigation. Loading it resolves the issue's owning team before rendering the team-scoped navigation and options.
+
+| Area | Required behavior |
+| --- | --- |
+| Identity | Show immutable issue key and owning team. The title is editable; key/team are not. |
+| Description | Long-form text supports context, acceptance criteria, and links. Title and description use an explicit save action. |
+| Properties | Status, priority, assignee, cycle, due date, and labels are editable from the detail page. Options are restricted to the issue's team. |
+| Concurrency | Every mutation sends the last observed `version`. A 409 prompts reload/reconciliation instead of overwriting another user's edit. |
+| Activity | Merge visible comments and append-only issue events into one stable chronological stream ordered by `(created_at, id)`. A comment's audit event may be hidden from the presentation when the comment itself is shown, avoiding duplicate timeline rows. |
+| Comments | Authorized team members can add a non-empty comment. Creation of the comment and its corresponding audit event is one transaction. |
+| Metadata | Show creator, created/updated timestamps, and current version. Future project, milestone, sub-issue, and GitHub PR areas extend this page without changing its canonical route. |
+
+Create and list views may expose a compact subset, but they must link to this full page. Core field support cannot exist only in the API.

@@ -3,7 +3,7 @@
 This page is the clean implementation baseline for CommonPlan. It contains only the tables and columns that exist after applying the current migration heads:
 
 - Auth DB: `20260910_0002`
-- Business DB: `20260919_0006`
+- Business DB: `20260920_0009`
 
 `IMPLEMENTED` means the table exists in PostgreSQL and has an active SQLAlchemy runtime model. `PROPOSED` means the entity belongs to the target product design but has no migration yet.
 
@@ -66,6 +66,21 @@ erDiagram
 ```mermaid
 erDiagram
     USERS ||--o{ APPLICATION_SESSIONS : may_own
+    USERS ||--o{ WORKSPACE_MEMBERSHIPS : joins
+    WORKSPACES ||--o{ WORKSPACE_MEMBERSHIPS : has
+    WORKSPACES ||--o{ TEAMS : contains
+    TEAMS ||--o{ TEAM_MEMBERSHIPS : has
+    USERS ||--o{ TEAM_MEMBERSHIPS : joins
+    TEAMS ||--o{ WORKFLOW_STATES : defines
+    TEAMS ||--o{ CYCLES : plans
+    TEAMS ||--o{ LABELS : defines
+    TEAMS ||--o{ ISSUES : owns
+    WORKFLOW_STATES ||--o{ ISSUES : classifies
+    CYCLES ||--o{ ISSUES : groups
+    ISSUES ||--o{ ISSUE_LABELS : tagged
+    LABELS ||--o{ ISSUE_LABELS : applies
+    ISSUES ||--o{ ISSUE_COMMENTS : discusses
+    ISSUES ||--o{ ISSUE_EVENTS : records
 
     USERS {
         integer id PK
@@ -86,6 +101,74 @@ erDiagram
         timestamptz expires_at
         timestamptz created_at
         timestamptz updated_at
+    }
+    WORKSPACE_MEMBERSHIPS {
+        varchar_36 workspace_id PK, FK
+        integer user_id PK, FK
+        varchar_16 role
+        varchar_16 status
+    }
+    TEAM_MEMBERSHIPS {
+        varchar_36 team_id PK, FK
+        integer user_id PK, FK
+        varchar_16 role
+    }
+    WORKSPACES {
+        varchar_36 id PK
+        varchar_80 slug UK
+        varchar_255 name
+        integer created_by_user_id FK
+    }
+    TEAMS {
+        varchar_36 id PK
+        varchar_36 workspace_id FK
+        varchar_12 issue_prefix
+        bigint next_issue_number
+    }
+    WORKFLOW_STATES {
+        varchar_36 id PK
+        varchar_36 team_id FK
+        varchar_80 name
+        varchar_24 category
+    }
+    CYCLES {
+        varchar_36 id PK
+        varchar_36 team_id FK
+        date starts_on
+        date ends_on
+    }
+    LABELS {
+        varchar_36 id PK
+        varchar_36 team_id FK
+        varchar_80 name
+        varchar_16 color
+    }
+    ISSUES {
+        varchar_36 id PK
+        varchar_36 workspace_id FK
+        varchar_36 team_id FK
+        varchar_32 key UK
+        varchar_500 title
+        varchar_36 workflow_state_id FK
+        integer version
+    }
+    ISSUE_LABELS {
+        varchar_36 issue_id PK, FK
+        varchar_36 label_id PK, FK
+    }
+    ISSUE_COMMENTS {
+        varchar_36 id PK
+        varchar_36 issue_id FK
+        integer author_user_id FK
+        text body
+        timestamptz created_at
+    }
+    ISSUE_EVENTS {
+        varchar_36 id PK
+        varchar_36 issue_id FK
+        integer actor_user_id FK
+        varchar_64 event_type
+        jsonb changes
     }
     BROWSER_AUTH_SESSIONS {
         varchar_64 session_hash PK
@@ -112,6 +195,18 @@ The `(auth_issuer, auth_subject)` badges denote the partial composite unique ind
 | Business | `users` | `User` | Application-facing user projection keyed by `(auth_issuer, auth_subject)` |
 | Business | `application_sessions` | `ApplicationSession` | Durable product workflow state with Redis as an optional read-through cache |
 | Business | `browser_auth_sessions` | `BrowserAuthSession` | Opaque-cookie lookup and encrypted refresh-token vault |
+| Business | `workspaces` | `Workspace` | Top-level collaboration and authorization boundary |
+| Business | `workspace_memberships` | `WorkspaceMembership` | Workspace role and active membership |
+| Business | `workspace_invitations` | `WorkspaceInvitation` | Expiring invitations into a workspace and optional team |
+| Business | `teams` | `Team` | Team scope, issue prefix, and atomic issue-number allocator |
+| Business | `team_memberships` | `TeamMembership` | Team membership and lead/member role |
+| Business | `workflow_states` | `WorkflowState` | Team-owned issue workflow states and categories |
+| Business | `cycles` | `Cycle` | Non-overlapping team planning windows |
+| Business | `labels` | `Label` | Team-owned issue labels |
+| Business | `issues` | `Issue` | Versioned team work item with an immutable key |
+| Business | `issue_labels` | `IssueLabel` | Many-to-many issue label assignment |
+| Business | `issue_comments` | `IssueComment` | Authored issue discussion with soft-delete timestamps |
+| Business | `issue_events` | `IssueEvent` | Append-only issue change and collaboration history |
 
 ## Cross-database identity mapping
 

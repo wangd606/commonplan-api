@@ -18,10 +18,10 @@ This plan delivers CommonPlan as runnable vertical slices across the `commonplan
 | --- | --- | --- | --- |
 | M0 — Platform baseline | Independent Auth Service, JWT-protected Business API, BFF refresh vault, clean databases | None | Register/login with password or Google, refresh, call protected API |
 | M1 — Workspace and Team | Multi-workspace and multi-team membership plus navigation | M0 | Switch workspace and Team 1/Team 2; see only authorized teams |
-| M2 — Issue planning core | Workflow states, cycles, issues, labels, assignment | M1 | Create `KEY-1` and update status, priority, assignee, cycle, and labels |
+| M2 — Issue planning core | Workflow states, cycles, issues, labels, full issue detail, comments, and activity | M1 | Create `KEY-1`, open its deep link, edit every core field, comment, and inspect its history |
 | M3 — Projects | Project brief, objectives, milestones, updates, linked issues | M2 | Create and manage a project with description, progress, and work items |
 | M4 — Team Summary and analytics | Per-team summary, filters, visualizations, and drill-down | M2; richer project charts use M3 | Switch teams and see filter-consistent Jira-style analytics |
-| M5 — Collaboration | Comments, activity, sub-issues, and complete resource policies | M2 | Collaborate on an issue while cross-team access fails closed |
+| M5 — Collaboration | Comment lifecycle, sub-issues, mentions, notifications, and complete resource policies | M2 | Collaborate on an issue while cross-team access fails closed |
 | M6 — Saved views and Inbox | Reusable filters, My Issues, notifications, unread state | M4, M5 | Save a Summary/issue filter and receive actionable notifications |
 | M7 — GitHub integration | Signed webhook intake and PR-to-issue auto-linking by item key | M2, M5 | A PR title containing `KEY-12` appears on that issue without project mapping |
 | M8 — Settings and administration | Personal, connected-account, workspace, member, and domain settings | M1, M5 | Manage account/workspace settings with role checks and audit records |
@@ -81,15 +81,18 @@ Exit demo:
 
 Scope:
 
-- Add `workflow_states`, `cycles`, `issues`, `labels`, and `issue_labels`.
+- Add `workflow_states`, `cycles`, `issues`, `labels`, `issue_labels`, `issue_comments`, and append-only `issue_events`.
 - Generate immutable team-prefixed keys under transaction/row lock.
 - Implement issue list, create, detail, update, assignment, labels, cycle filtering, and optimistic `version` checks.
-- Build Issues and Cycles pages plus issue create/detail UI.
+- Build Issues and Cycles pages plus a dedicated, deep-linkable issue detail route.
+- The detail page edits title, description, status, priority, assignee, cycle, due date, and labels; it also supports adding comments and reading the chronological activity stream.
+- Keep property changes immediate, but save long-form title/description edits explicitly so users do not lose a draft to an accidental blur.
 
 Exit demo:
 
-- Create `KEY-1`, assign it, change workflow state and priority, attach labels, and put it in a cycle.
+- Create `KEY-1`, open `/workspaces/{workspaceId}/issues/KEY-1`, edit every core field, add a comment, and see creation/update/comment activity.
 - See different issue lists when switching teams.
+- Refresh the detail URL and use browser back/forward without losing navigation state.
 - Submit a stale update and receive 409 rather than silently overwriting another edit.
 
 ## M3 — Projects
@@ -128,14 +131,13 @@ Exit demo:
 4. Refresh and share the URL; the filter state must be restored.
 5. Verify empty team, no current cycle, no project, and zero-result states.
 
-## M5 — Collaboration
+## M5 — Collaboration expansion
 
 Scope:
 
-- Add `issue_comments` and append-only `issue_events`.
-- Implement comments, edit/delete policy, activity timeline, sub-issues, and assignment/activity events.
+- Add comment edit/delete policy, mentions, sub-issues, watchers, and notification-producing collaboration events.
 - Centralize workspace/team/resource authorization and cover it with a role/resource matrix.
-- Add comments, activity, and sub-issue sections to issue detail.
+- Expand the M2 issue detail with comment actions, sub-issues, mentions, and notification controls.
 
 Exit demo:
 

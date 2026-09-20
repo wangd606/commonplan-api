@@ -227,3 +227,27 @@ class IssueRead(BaseModel):
     labels: list[LabelRead]
     created_at: datetime
     updated_at: datetime
+
+
+class IssueCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=20000)
+
+    @field_validator("body")
+    @classmethod
+    def normalize_body(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Comment cannot be empty")
+        return normalized
+
+
+class IssueActivityRead(BaseModel):
+    id: str
+    kind: str
+    actor_user_id: int | None
+    actor_name: str | None
+    body: str | None = None
+    event_type: str | None = None
+    changes: dict = Field(default_factory=dict)
+    created_at: datetime
+    edited_at: datetime | None = None

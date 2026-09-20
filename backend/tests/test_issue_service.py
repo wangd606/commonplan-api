@@ -96,6 +96,21 @@ def test_cycle_label_and_optimistic_issue_update(context):
     )
     assert updated.version == 2
 
+    updated, updated_labels = service.update_issue(
+        owner,
+        workspace.id,
+        issue.key,
+        {
+            "version": 2,
+            "description": "The callback fails after Google redirects.",
+            "due_date": date(2026, 10, 1),
+            "label_ids": [],
+        },
+    )
+    assert updated.description.startswith("The callback")
+    assert updated.due_date == date(2026, 10, 1)
+    assert updated_labels == []
+
     with pytest.raises(IssueConflict):
         service.update_issue(
             owner,
@@ -135,3 +150,29 @@ def test_cross_team_references_are_rejected(context):
             workflow_state_id=foreign_state.id,
             label_ids=[],
         )
+
+
+def test_issue_activity_contains_creation_updates_and_comments(context):
+    service, _workspaces, owner, workspace, team = context
+    issue, _ = service.create_issue(
+        owner, workspace.id, team.id, title="Build issue detail", label_ids=[]
+    )
+    service.update_issue(
+        owner,
+        workspace.id,
+        issue.key,
+        {"version": 1, "priority": 3},
+    )
+    comment = service.add_comment(
+        owner, workspace.id, issue.key, "This should support a complete workflow."
+    )
+
+    activity = service.activity(owner, workspace.id, issue.key)
+    assert comment["kind"] == "comment"
+    assert comment["actor_name"] == "Owner"
+    assert {row["event_type"] for row in activity if row["kind"] == "event"} == {
+        "issue.created",
+        "issue.updated",
+        "comment.created",
+    }
+    assert next(row for row in activity if row["kind"] == "comment")["body"].startswith("This should")
