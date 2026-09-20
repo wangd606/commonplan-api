@@ -1,86 +1,88 @@
 # 01 — Identity, profile, and personal settings
 
-**UI:** Profile, Security & access, Connected accounts, account menu (KEY-3 pages 9, 10, 15). **Boundary:** Auth Service owns credentials and login identities; Business API owns product preferences and a read-side user mirror.
+**UI:** Profile, Security & access, Connected accounts, account menu (KEY-3 pages 9, 10, 15). **Boundary:** Auth Service owns credentials and login identities; Business API owns product preferences and a read-side user projection.
+
+The exact implemented tables and columns are shown in [00 — Current schema and migration map](00-current-schema-map.md). This page describes how those records participate in the identity workflow, then isolates the two proposed personal-settings tables.
+
+## Implemented identity and session responsibilities
+
+| Record | Database | Status | Responsibility |
+| --- | --- | --- | --- |
+| `identity_users` | Auth | AS-IS / runtime | Canonical identity, password hash, activation state, display identity |
+| `external_identities` | Auth | AS-IS / runtime | Google/provider subject linked to an identity |
+| `refresh_tokens` | Auth | AS-IS / runtime | Hash-only token-family rotation and replay detection |
+| `login_attempts` | Auth | AS-IS / runtime | Login throttling/lockout keyed by hashed identifier |
+| `login_codes` | Auth | AS-IS / runtime | Single-use, short-lived code exchanged by the web BFF |
+| `users` | Business | AS-IS / runtime | Lazily provisioned product user projection keyed by `(auth_issuer, auth_subject)` |
+| `application_sessions` | Business | AS-IS / runtime | Durable product workflow/session state; independent from login authentication |
+| `browser_auth_sessions` | Business | AS-IS / runtime | Server-side vault for the encrypted raw refresh token; browser holds only an opaque HttpOnly cookie |
+| `refresh_tokens` | Business | AS-IS / legacy | Superseded table from before Auth Service extraction; not runtime-mapped |
+
+The Auth `identity_users` to Business `users` relationship is logical only: a JWT `(iss, sub)` causes the Business API to find or provision one local user. There is no cross-database foreign key.
+
+## Target extension for personal settings
+
+Only the two preference entities below are **PROPOSED**. The diagram intentionally does not repeat the implemented Auth and session tables from page 00, preventing current and future schemas from being mistaken for one migration state.
 
 ```mermaid
 erDiagram
-    IDENTITY_USER ||--o{ EXTERNAL_IDENTITY : links
-    IDENTITY_USER ||--o{ REFRESH_TOKEN : rotates
-    IDENTITY_USER ||--o{ LOGIN_CODE : exchanges
-    IDENTITY_USER ||--o| BUSINESS_USER : projects_to
     BUSINESS_USER ||--o| USER_PREFERENCE : configures
     BUSINESS_USER ||--o{ NOTIFICATION_PREFERENCE : configures
 
-    IDENTITY_USER {
-        string id PK
-        string email UK
-        string name
-        string password_hash
-        bool is_active
-    }
-    EXTERNAL_IDENTITY {
-        int id PK
-        string provider
-        string subject
-        string user_id FK
-    }
-    REFRESH_TOKEN {
-        int id PK
-        string token_hash UK
-        string family_id
-        string user_id FK
-        datetime expires_at
-        datetime revoked_at
-    }
     BUSINESS_USER {
-        int id PK
-        string auth_issuer
-        string auth_subject
-        string email
-        string name
+        integer id PK
+        varchar_255 auth_issuer UK
+        varchar_255 auth_subject UK
+        varchar_255 email
+        varchar_255 name
     }
     USER_PREFERENCE {
-        int user_id PK, FK
-        string timezone
-        string locale
+        integer user_id PK, FK
+        varchar_64 timezone
+        varchar_16 locale
         uuid default_workspace_id FK
         uuid default_team_id FK
+        varchar_16 theme
+        timestamptz updated_at
     }
     NOTIFICATION_PREFERENCE {
-        int user_id PK, FK
-        string event_type PK
-        string channel PK
-        bool enabled
+        integer user_id PK, FK
+        varchar event_type PK
+        varchar channel PK
+        boolean enabled
+        timestamptz updated_at
     }
 ```
 
-The identity-to-business-user line crosses databases and is **logical only**; no SQL foreign key crosses that boundary. `IDENTITY_USER`, `EXTERNAL_IDENTITY`, `REFRESH_TOKEN`, `LOGIN_CODE`, and the browser-auth-session vault already exist. `USER_PREFERENCE` and `NOTIFICATION_PREFERENCE` are proposed.
+`BUSINESS_USER` above is the existing Business `users` table. The `UK` labels denote the two columns in its partial composite unique index.
 
-## Field contract
+## Proposed field contract
 
 | Entity | Fields and PostgreSQL types | Invariants / UI use |
 | --- | --- | --- |
-| `identity_users` (existing, Auth DB) | `id varchar(36) PK`, `email varchar(320) UNIQUE`, `name varchar(255)`, `password_hash varchar(512) NULL`, `avatar_url varchar(1024) NULL`, `is_active boolean`, timestamps | Email/password and Google login resolve to one identity. Password hash never leaves Auth Service. |
-| `external_identities` (existing, Auth DB) | `id integer PK`, `provider varchar(64)`, `subject varchar(255)`, `user_id varchar(36) FK`, `created_at` | `UNIQUE(provider, subject)`. Google shown under personal Connected accounts; not a workspace application. |
-| `refresh_tokens` (existing, Auth DB) | `id integer PK`, `token_hash varchar(64) UNIQUE`, `family_id varchar(36)`, `user_id FK`, `expires_at`, `revoked_at`, `replaced_by_hash`, `created_at` | Hash-only storage and family-wide replay response. Raw refresh credential remains in the BFF vault, not browser storage. |
-| `users` (existing, Business DB) | `id integer PK`, `auth_issuer`, `auth_subject`, mirrored `email`, `name`, `avatar_url`, `is_deleted`, timestamps | Add/verify `UNIQUE(auth_issuer, auth_subject)` in migration. Email is **not** a security key. Mirror fields are read-only in Business API. |
-| `user_preferences` (P0) | `user_id integer PK/FK`, `timezone varchar(64)`, `locale varchar(16)`, `default_workspace_id uuid NULL`, `default_team_id uuid NULL`, `theme varchar(16)`, `updated_at` | Defaults must reference workspaces/teams the user can access; if membership is removed, clear the invalid default. Timezone drives due-date display, not stored issue dates. |
-| `notification_preferences` (P1) | composite PK `(user_id, event_type, channel)`, `enabled boolean`, `updated_at` | Initial channel is in-app; email delivery can be added without changing the key. |
-
-The Auth DB also retains `login_attempts` and one-time `login_codes` for security flows. The Business DB retains `browser_auth_sessions` and richer `application_sessions`; these are not substitutes for JWT authentication.
+| `user_preferences` (P0, PROPOSED) | `user_id integer PK/FK`, `timezone varchar(64)`, `locale varchar(16)`, `default_workspace_id uuid NULL`, `default_team_id uuid NULL`, `theme varchar(16)`, `updated_at` | Defaults must reference workspaces/teams the user can access; if membership is removed, clear the invalid default. Timezone drives due-date display, not stored issue dates. |
+| `notification_preferences` (P1, PROPOSED) | composite PK `(user_id, event_type, channel)`, `enabled boolean`, `updated_at` | Initial channel is in-app; email delivery can be added without changing the key. |
 
 ## API contract
 
-| Endpoint | Purpose / access |
-| --- | --- |
-| `GET /api/v1/me` | JWT required; returns Business user, accessible workspaces, and preference defaults. Does not list all users globally. |
-| `PATCH /api/v1/me/preferences` | Self-only; update timezone, locale, theme, default workspace/team. Reject inaccessible defaults. |
-| `GET /api/v1/me/notification-preferences` / `PUT ...` | Self-only; effective notification switches. |
-| `GET /auth/me` / `PATCH /auth/me` (proposed BFF/Auth Service flow) | Identity-owned display name, email and avatar. Email change needs verification before becoming the login identifier. |
-| `GET /auth/identities`, `DELETE /auth/identities/{provider}` (proposed) | Self-only; list/disconnect Google. Reject disconnecting the last usable login method. |
-| `GET /auth/sessions`, `DELETE /auth/sessions/{id}` (proposed) | Self-only; derive device sessions from refresh families/BFF sessions and revoke a selected session. |
+| Endpoint | Implementation status | Purpose / access |
+| --- | --- | --- |
+| `GET /api/v1/me` | PROPOSED | JWT required; returns Business user, accessible workspaces, and preference defaults. Does not list all users globally. |
+| `PATCH /api/v1/me/preferences` | PROPOSED | Self-only; update timezone, locale, theme, default workspace/team. Reject inaccessible defaults. |
+| `GET /api/v1/me/notification-preferences` / `PUT ...` | PROPOSED | Self-only; effective notification switches. |
+| `GET /auth/me` | AS-IS / runtime | Return the current Auth identity. |
+| `PATCH /auth/me` | PROPOSED | Update identity-owned display name, email, or avatar. Email change requires verification. |
+| `GET /auth/identities`, `DELETE /auth/identities/{provider}` | PROPOSED | List/disconnect Google; reject disconnecting the last usable login method. |
+| `GET /auth/sessions`, `DELETE /auth/sessions/{id}` | PROPOSED | Derive device sessions from refresh families/BFF sessions and revoke a selected session. |
 
-The account-menu actions “Switch workspace” and “Log out” do not need their own product tables: workspace selection is client navigation plus a preference, while logout revokes the current BFF/auth session.
+The account-menu actions “Switch workspace” and “Log out” do not need their own product tables: workspace selection is client navigation plus a preference, while logout revokes the current browser/auth session.
+
+## Required implementation reconciliation
+
+1. Keep identity-owned email/name changes in Auth Service. The current Business `PATCH /users/{id}` can be overwritten by the next JWT projection and should not serve as the profile-edit endpoint.
+2. Add a cleanup migration only after deciding rollback/data-retention policy for Business `refresh_tokens`, `users.password_hash`, and `users.google_sub`. Their absence from ORM models does not remove them from PostgreSQL.
+3. Treat Business `users.email` as a read-only projection. It is physically unique today, but it is not the authentication join key.
+4. If more than one Auth issuer will be accepted, add `auth_issuer` to `browser_auth_sessions`; `auth_subject` alone is only unambiguous under the current single-issuer deployment.
 
 ## Later, not silently in P0
 
