@@ -186,6 +186,10 @@ def test_bff_rejects_cross_site_auth_requests_and_clears_invalid_session():
         ("get", "/users/1", None),
         ("patch", "/users/1", {"name": "Updated User"}),
         ("delete", "/users/1", None),
+        ("get", "/api/v1/workspaces", None),
+        ("post", "/api/v1/workspaces", {"name": "Acme", "slug": "acme"}),
+        ("get", "/api/v1/workspaces/workspace-1/teams", None),
+        ("post", "/api/v1/workspaces/workspace-1/teams", {"name": "Core", "issue_prefix": "CORE"}),
     ],
 )
 def test_every_business_route_requires_access_token(method, path, json_body):

@@ -13,6 +13,7 @@ from app.models import User
 from app.schemas import UserRead, UserUpdate
 from app.services.user_service import UserConflict, UserServiceDep
 from app.stores.session_store import SessionStoreUnavailable
+from app.workspace_routes import router as workspace_router
 
 
 @asynccontextmanager
@@ -31,6 +32,7 @@ app = FastAPI(title="Project Zhitong Business API", lifespan=lifespan)
 # fail-closed by default and runs before endpoint or service logic. Only health
 # and API metadata live on the unprotected application router.
 business_router = APIRouter(dependencies=[Depends(get_current_user)])
+business_router.include_router(workspace_router)
 
 
 @app.exception_handler(SessionStoreUnavailable)
