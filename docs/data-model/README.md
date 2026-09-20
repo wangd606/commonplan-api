@@ -2,6 +2,8 @@
 
 This package contains the implemented schema baseline and the target product schema. [00 — Current implemented schema](00-current-schema-map.md) reflects the current migration heads. Modules 01–06 translate the [16-page KEY-3 UI specification](https://github.com/wangd606/commonplan-web/blob/codex/KEY-14-import-web/output/pdf/KEY-3-zhitong-ui-design.pdf) into bounded contexts.
 
+Delivery order, exit criteria, and local verification are documented in the [CommonPlan implementation milestones](../implementation/milestones.md).
+
 Use these labels when comparing code and design: **IMPLEMENTED** exists in both migrations and runtime ORM; **PROPOSED** has no migration yet.
 
 ## Domain boundaries
@@ -33,7 +35,7 @@ erDiagram
 | Identity and personal settings | [01 — Identity and profile](01-identity-profile.md) | 9, 10, 15 | Existing auth + P0 corrections; optional controls later |
 | Workspaces, teams, access | [02 — Workspace and team](02-workspace-team.md) | 2, 8, 11, 12 | P0 |
 | Work planning | [03 — Projects, cycles, issues](03-work-planning.md) | 2, 4, 5, 6, 8 | P0 |
-| Views and read models | [04 — Views, summary, inbox](04-views-notifications.md) | 2, 3, 7 | P1 |
+| Team Summary, views and inbox | [04 — Team Summary, views, inbox](04-views-notifications.md) | 2, 3, 7 | Summary M4; views/inbox M6 |
 | GitHub PR linking | [05 — GitHub webhook](05-github-webhook.md) | 4, 14 | P1 |
 | Administration | [06 — Administration](06-administration.md) | 9–13, 15 | Core settings P0; advanced controls later |
 | Visual design system | No persistence | 1, 16 | Web-only |
@@ -54,7 +56,7 @@ Paths in this matrix omit the `/api/v1` prefix unless explicitly shown; the GitH
 | Project brief, objectives, updates, milestones | `projects`, `project_objectives`, `project_updates`, `project_milestones` | `GET/PATCH .../projects/{p}`, nested update APIs |
 | Cycles menu and issue planning | `cycles`, `issues.cycle_id` | `GET/POST .../cycles`, issue filter/update |
 | Saved view and filters | `saved_views` + authorized issue query | `GET/POST .../views`, `GET .../views/{id}/issues` |
-| Summary, status distribution, priority mix | Aggregate over authorized issues/events | `GET .../summary`; no P0/P1 summary table |
+| Team Summary, customized filters, and default visualizations | Team-scoped aggregates over authorized issues/events using the shared filter grammar | `GET .../teams/{t}/summary`; no summary table |
 | Inbox and unread state | `notifications` | `GET /me/inbox`, `POST .../read` |
 | Personal profile, Google identity, password/sessions | Auth Service tables; Business `users` mirror | BFF/Auth Service identity and session endpoints |
 | Personal timezone/default team/notification switches | `user_preferences`, `notification_preferences` | `PATCH /me/preferences`, notification-preference APIs |
