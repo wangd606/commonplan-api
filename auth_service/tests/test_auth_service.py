@@ -286,3 +286,24 @@ def test_google_cancel_is_an_expected_redirect(monkeypatch):
     )
     assert response.status_code == 302
     assert response.headers["location"] == f"{settings.frontend_url}?auth_error=access_denied"
+
+
+def test_invalid_google_id_token_is_a_safe_redirect(monkeypatch):
+    from joserfc.errors import InvalidTokenError
+
+    class InvalidTokenGoogleClient:
+        async def authorize_access_token(self, _request):
+            raise InvalidTokenError("iat")
+
+    class InvalidTokenOAuth:
+        google = InvalidTokenGoogleClient()
+
+    monkeypatch.setattr(main_module, "google_oauth_configured", True)
+    monkeypatch.setattr(main_module, "oauth", InvalidTokenOAuth())
+    response = client.get(
+        "/auth/google/callback?code=one-time-code&state=state",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == f"{settings.frontend_url}?auth_error=oauth_failed"

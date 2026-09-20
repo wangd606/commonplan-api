@@ -88,6 +88,7 @@ services:
       COOKIE_SAME_SITE: ${AUTH_COOKIE_SAME_SITE:-lax}
     ports:
       - "8001:8001"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--no-access-log"]
     volumes:
       - ./auth_service/app:/app/app
       - ./auth_service/alembic:/app/alembic

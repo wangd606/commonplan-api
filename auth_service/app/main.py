@@ -8,6 +8,7 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from joserfc.errors import JoseError
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -242,6 +243,11 @@ async def google_callback(
         request.session.clear()
         error_code = "access_denied" if exc.error == "access_denied" else "oauth_failed"
         return RedirectResponse(frontend_auth_error_url(error_code), status_code=302)
+    except JoseError:
+        # Keep OIDC claim verification strict, but never expose a validation
+        # traceback or leave the browser on the auth service error page.
+        request.session.clear()
+        return RedirectResponse(frontend_auth_error_url("oauth_failed"), status_code=302)
 
     profile = token.get("userinfo")
     if profile is None:
