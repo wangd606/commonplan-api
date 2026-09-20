@@ -1,0 +1,212 @@
+import uuid
+from datetime import date
+from decimal import Decimal
+from typing import Annotated
+
+from fastapi import Depends
+from sqlalchemy.exc import IntegrityError
+
+from app.models import Cycle, Issue, Label, User
+from app.repositories.issue_repository import IssueRepository, IssueRepositoryDep
+from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
+
+
+class IssueNotFound(Exception): pass
+class IssueForbidden(Exception): pass
+class IssueConflict(Exception): pass
+class IssueValidationError(Exception): pass
+
+
+class IssueService:
+    def __init__(self, repository: IssueRepository, workspaces: WorkspaceService):
+        self.repository = repository
+        self.workspaces = workspaces
+
+    def states(self, user: User, workspace_id: str, team_id: str):
+        self._access(user, workspace_id, team_id)
+        return self.repository.states(team_id)
+
+    def cycles(self, user: User, workspace_id: str, team_id: str):
+        self._access(user, workspace_id, team_id)
+        return self.repository.cycles(team_id)
+
+    def create_cycle(self, user: User, workspace_id: str, team_id: str, *, name, starts_on, ends_on):
+        _team, team_membership, workspace_membership = self._access(user, workspace_id, team_id)
+        if workspace_membership.role not in {"owner", "admin"} and (team_membership is None or team_membership.role != "lead"):
+            raise IssueForbidden
+        if starts_on >= ends_on:
+            raise IssueValidationError("Cycle start must be before its end")
+        for existing in self.repository.cycles(team_id):
+            if starts_on < existing.ends_on and ends_on > existing.starts_on:
+                raise IssueConflict("Cycle dates overlap an existing cycle")
+        cycle = Cycle(id=str(uuid.uuid4()), team_id=team_id, name=name.strip(), starts_on=starts_on, ends_on=ends_on)
+        self.repository.add(cycle)
+        self._commit()
+        self.repository.refresh(cycle)
+        return cycle
+
+    def labels(self, user: User, workspace_id: str, team_id: str):
+        self._access(user, workspace_id, team_id)
+        return self.repository.labels(team_id)
+
+    def create_label(self, user: User, workspace_id: str, team_id: str, *, name, color):
+        self._access(user, workspace_id, team_id)
+        label = Label(id=str(uuid.uuid4()), team_id=team_id, name=name.strip(), color=color.upper())
+        self.repository.add(label)
+        self._commit()
+        return label
+
+    def list_issues(self, user: User, workspace_id: str, team_id: str, **filters):
+        self._access(user, workspace_id, team_id)
+        return [(issue, self.repository.issue_labels(issue.id)) for issue in self.repository.issues(team_id, **filters)]
+
+    def create_issue(self, user: User, workspace_id: str, team_id: str, **values):
+        self._access(user, workspace_id, team_id)
+        team = self.repository.team_for_update(team_id)
+        if team is None or team.workspace_id != workspace_id:
+            raise IssueNotFound
+        state_id = values.get("workflow_state_id")
+        state = self.repository.state(state_id) if state_id else self.repository.default_state(team_id)
+        if state is None or state.team_id != team_id:
+            raise IssueValidationError("Workflow state must belong to the selected team")
+        self._validate_refs(team_id, values.get("assignee_user_id"), values.get("cycle_id"), values.get("label_ids", []))
+        number = team.next_issue_number
+        team.next_issue_number += 1
+        issue = Issue(
+            id=str(uuid.uuid4()), workspace_id=workspace_id, team_id=team_id,
+            number=number, key=f"{team.issue_prefix}-{number}",
+            title=values["title"].strip(), description=values.get("description"),
+            workflow_state_id=state.id, priority=values.get("priority", 0),
+            creator_user_id=user.id, assignee_user_id=values.get("assignee_user_id"),
+            cycle_id=values.get("cycle_id"), due_date=values.get("due_date"),
+            position=Decimal(number), version=1,
+        )
+        self.repository.add(issue)
+        self.repository.db.flush()
+        self.repository.replace_labels(issue.id, values.get("label_ids", []))
+        self._commit()
+        self.repository.refresh(issue)
+        return issue, self.repository.issue_labels(issue.id)
+
+    def get_issue(self, user: User, workspace_id: str, key: str):
+        issue = self.repository.issue(workspace_id, key)
+        if issue is None:
+            raise IssueNotFound
+        self._access(user, workspace_id, issue.team_id)
+        return issue, self.repository.issue_labels(issue.id)
+
+    def update_issue(self, user: User, workspace_id: str, key: str, changes: dict):
+        issue = self.repository.issue(workspace_id, key, for_update=True)
+        if issue is None:
+            raise IssueNotFound
+        self._access(user, workspace_id, issue.team_id)
+        expected_version = changes.pop("version")
+        if issue.version != expected_version:
+            raise IssueConflict("Issue changed since it was loaded")
+        label_ids = changes.pop("label_ids", None)
+        state_id = changes.get("workflow_state_id")
+        if state_id is not None:
+            state = self.repository.state(state_id)
+            if state is None or state.team_id != issue.team_id:
+                raise IssueValidationError("Workflow state must belong to the selected team")
+        self._validate_refs(issue.team_id, changes.get("assignee_user_id"), changes.get("cycle_id"), label_ids or [])
+        for field, value in changes.items():
+            setattr(issue, field, value.strip() if field == "title" and isinstance(value, str) else value)
+        if label_ids is not None:
+            self.repository.replace_labels(issue.id, label_ids)
+        issue.version += 1
+        self._commit()
+        self.repository.refresh(issue)
+        return issue, self.repository.issue_labels(issue.id)
+
+    def my_issues(self, user: User, workspace_id: str | None = None):
+        from sqlalchemy import select
+        stmt = select(Issue).where(Issue.assignee_user_id == user.id, Issue.archived_at.is_(None))
+        if workspace_id:
+            self.workspaces.get_workspace(user, workspace_id)
+            stmt = stmt.where(Issue.workspace_id == workspace_id)
+        issues = list(self.repository.db.scalars(stmt.order_by(Issue.updated_at.desc(), Issue.id)))
+        visible = []
+        for issue in issues:
+            try:
+                self._access(user, issue.workspace_id, issue.team_id)
+                visible.append((issue, self.repository.issue_labels(issue.id)))
+            except Exception:
+                continue
+        return visible
+
+    def team_overview(self, user: User, workspace_id: str, team_id: str):
+        self._access(user, workspace_id, team_id)
+        issues = self.repository.issues(team_id)
+        state_categories = {
+            state.id: state.category for state in self.repository.states(team_id)
+        }
+        today = date.today()
+        current_cycle = next(
+            (
+                cycle
+                for cycle in self.repository.cycles(team_id)
+                if cycle.starts_on <= today < cycle.ends_on
+            ),
+            None,
+        )
+        return {
+            "team_id": team_id,
+            "open_issue_count": sum(
+                state_categories.get(issue.workflow_state_id) not in {"done", "canceled"}
+                for issue in issues
+            ),
+            "current_cycle": (
+                {
+                    "id": current_cycle.id,
+                    "name": current_cycle.name,
+                    "starts_on": current_cycle.starts_on.isoformat(),
+                    "ends_on": current_cycle.ends_on.isoformat(),
+                }
+                if current_cycle
+                else None
+            ),
+            "recent_issues": [
+                {
+                    "key": issue.key,
+                    "title": issue.title,
+                    "priority": issue.priority,
+                    "workflow_state": self.repository.state(issue.workflow_state_id).name,
+                }
+                for issue in sorted(issues, key=lambda item: item.updated_at, reverse=True)[:5]
+            ],
+        }
+
+    def _access(self, user, workspace_id, team_id):
+        try:
+            return self.workspaces.get_team(user, workspace_id, team_id)
+        except Exception as exc:
+            if exc.__class__.__name__.endswith("NotFound"):
+                raise IssueNotFound from exc
+            raise IssueForbidden from exc
+
+    def _validate_refs(self, team_id, assignee_user_id, cycle_id, label_ids):
+        if assignee_user_id is not None and self.workspaces.repository.team_membership(team_id, assignee_user_id) is None:
+            raise IssueValidationError("Assignee must be an active team member")
+        if cycle_id is not None:
+            cycle = self.repository.cycle(cycle_id)
+            if cycle is None or cycle.team_id != team_id:
+                raise IssueValidationError("Cycle must belong to the selected team")
+        for label_id in label_ids:
+            label = self.repository.label(label_id)
+            if label is None or label.team_id != team_id:
+                raise IssueValidationError("Label must belong to the selected team")
+
+    def _commit(self):
+        try:
+            self.repository.commit()
+        except IntegrityError as exc:
+            self.repository.db.rollback()
+            raise IssueConflict("Issue planning value already exists") from exc
+
+
+def get_issue_service(repository: IssueRepositoryDep, workspaces: WorkspaceServiceDep) -> IssueService:
+    return IssueService(repository, workspaces)
+
+
+IssueServiceDep = Annotated[IssueService, Depends(get_issue_service)]

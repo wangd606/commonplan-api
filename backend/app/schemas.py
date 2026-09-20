@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -143,3 +143,87 @@ class TeamOverviewRead(BaseModel):
     open_issue_count: int = 0
     current_cycle: dict | None = None
     recent_issues: list[dict] = Field(default_factory=list)
+
+
+class WorkflowStateRead(BaseModel):
+    id: str
+    team_id: str
+    name: str
+    category: str
+    position: int
+    is_default: bool
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CycleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    starts_on: date
+    ends_on: date
+
+
+class CycleRead(BaseModel):
+    id: str
+    team_id: str
+    name: str
+    starts_on: date
+    ends_on: date
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LabelCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class LabelRead(BaseModel):
+    id: str
+    team_id: str
+    name: str
+    color: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IssueCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=50000)
+    workflow_state_id: str | None = None
+    priority: int = Field(default=0, ge=0, le=4)
+    assignee_user_id: int | None = None
+    cycle_id: str | None = None
+    due_date: date | None = None
+    label_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class IssueUpdate(BaseModel):
+    version: int = Field(ge=1)
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=50000)
+    workflow_state_id: str | None = None
+    priority: int | None = Field(default=None, ge=0, le=4)
+    assignee_user_id: int | None = None
+    cycle_id: str | None = None
+    due_date: date | None = None
+    label_ids: list[str] | None = Field(default=None, max_length=20)
+
+
+class IssueRead(BaseModel):
+    id: str
+    workspace_id: str
+    team_id: str
+    number: int
+    key: str
+    title: str
+    description: str | None
+    workflow_state_id: str
+    workflow_state_name: str
+    workflow_category: str
+    priority: int
+    creator_user_id: int
+    assignee_user_id: int | None
+    cycle_id: str | None
+    due_date: date | None
+    version: int
+    labels: list[LabelRead]
+    created_at: datetime
+    updated_at: datetime

@@ -8,7 +8,7 @@ from fastapi import Depends
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Team, TeamMembership, User, Workspace, WorkspaceInvitation, WorkspaceMembership
+from app.models import Team, TeamMembership, User, WorkflowState, Workspace, WorkspaceInvitation, WorkspaceMembership
 from app.repositories.workspace_repository import WorkspaceRepository, WorkspaceRepositoryDep
 
 
@@ -88,6 +88,24 @@ class WorkspaceService:
         team_membership = TeamMembership(team_id=team.id, user_id=user.id, role="lead")
         self.repository.add(team)
         self.repository.add(team_membership)
+        for position, (state_name, category, is_default) in enumerate(
+            [
+                ("Backlog", "backlog", False),
+                ("Todo", "todo", True),
+                ("In Progress", "in_progress", False),
+                ("Done", "done", False),
+            ]
+        ):
+            self.repository.add(
+                WorkflowState(
+                    id=str(uuid.uuid4()),
+                    team_id=team.id,
+                    name=state_name,
+                    category=category,
+                    position=position,
+                    is_default=is_default,
+                )
+            )
         self._commit()
         self.repository.refresh(team)
         return team, team_membership

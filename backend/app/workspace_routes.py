@@ -22,6 +22,7 @@ from app.services.workspace_service import (
     WorkspaceServiceDep,
     WorkspaceValidationError,
 )
+from app.services.issue_service import IssueForbidden, IssueNotFound, IssueServiceDep
 
 
 router = APIRouter(prefix="/api/v1", tags=["workspaces"])
@@ -64,9 +65,9 @@ def _member_read(user, membership, *, workspace: bool) -> MemberRead:
 
 
 def _translate(exc: Exception) -> HTTPException:
-    if isinstance(exc, WorkspaceNotFound):
+    if isinstance(exc, (WorkspaceNotFound, IssueNotFound)):
         return HTTPException(status_code=404, detail="Resource not found")
-    if isinstance(exc, WorkspaceForbidden):
+    if isinstance(exc, (WorkspaceForbidden, IssueForbidden)):
         return HTTPException(status_code=403, detail="Insufficient workspace or team access")
     if isinstance(exc, WorkspaceConflict):
         return HTTPException(status_code=409, detail="Workspace or team value already exists")
@@ -157,12 +158,16 @@ def update_team(
 
 @router.get("/workspaces/{workspace_id}/teams/{team_id}/overview", response_model=TeamOverviewRead)
 def team_overview(
-    workspace_id: str, team_id: str, current_user: CurrentUser, service: WorkspaceServiceDep
+    workspace_id: str,
+    team_id: str,
+    current_user: CurrentUser,
+    service: WorkspaceServiceDep,
+    issues: IssueServiceDep,
 ):
     try:
         service.get_team(current_user, workspace_id, team_id)
-        return TeamOverviewRead(team_id=team_id)
-    except (WorkspaceNotFound, WorkspaceForbidden) as exc:
+        return TeamOverviewRead(**issues.team_overview(current_user, workspace_id, team_id))
+    except (WorkspaceNotFound, WorkspaceForbidden, IssueNotFound, IssueForbidden) as exc:
         raise _translate(exc) from exc
 
 
