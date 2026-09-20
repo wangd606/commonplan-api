@@ -1,8 +1,8 @@
 # CommonPlan data model and API design
 
-This package contains both an audited view of the implemented schema and a reviewable target product schema. [00 — Current schema map](00-current-schema-map.md) is derived from the checked-in Alembic migrations and is the physical implementation baseline. Modules 01–06 translate the [16-page KEY-3 UI specification](https://github.com/wangd606/commonplan-web/blob/codex/KEY-14-import-web/output/pdf/KEY-3-zhitong-ui-design.pdf) into current and proposed bounded contexts.
+This package contains the implemented schema baseline and the target product schema. [00 — Current implemented schema](00-current-schema-map.md) reflects the current migration heads. Modules 01–06 translate the [16-page KEY-3 UI specification](https://github.com/wangd606/commonplan-web/blob/codex/KEY-14-import-web/output/pdf/KEY-3-zhitong-ui-design.pdf) into bounded contexts.
 
-Use these labels when comparing code and design: **AS-IS / runtime** exists in migrations and runtime ORM, **AS-IS / legacy** exists physically but is no longer runtime-mapped, and **PROPOSED** has no migration yet.
+Use these labels when comparing code and design: **IMPLEMENTED** exists in both migrations and runtime ORM; **PROPOSED** has no migration yet.
 
 ## Domain boundaries
 
@@ -29,7 +29,7 @@ erDiagram
 
 | Module | Detailed schema and API | KEY-3 views | Delivery |
 | --- | --- | --- | --- |
-| Implemented schema audit | [00 — Current schema and migration map](00-current-schema-map.md) | N/A | As-is, all current tables |
+| Implemented schema | [00 — Current implemented schema](00-current-schema-map.md) | N/A | Current migration heads |
 | Identity and personal settings | [01 — Identity and profile](01-identity-profile.md) | 9, 10, 15 | Existing auth + P0 corrections; optional controls later |
 | Workspaces, teams, access | [02 — Workspace and team](02-workspace-team.md) | 2, 8, 11, 12 | P0 |
 | Work planning | [03 — Projects, cycles, issues](03-work-planning.md) | 2, 4, 5, 6, 8 | P0 |
@@ -84,4 +84,4 @@ If cross-team projects, guest access, or one GitHub organization shared by multi
 
 ## Existing implementation gap
 
-Today `backend/app/main.py` exposes only authenticated user routes; the proposed product entities below do not exist. The exact eight-table physical inventory is in [00 — Current schema map](00-current-schema-map.md). `PATCH /users/{id}` currently mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT. Before shipping profile editing, move identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.
+Today `backend/app/main.py` exposes only authenticated user routes; the proposed product entities below do not exist. The eight implemented domain tables are in [00 — Current implemented schema](00-current-schema-map.md). `PATCH /users/{id}` currently mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT. Before shipping profile editing, move identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.

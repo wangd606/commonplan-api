@@ -58,10 +58,8 @@ do to this resource**. Application sessions hold non-credential workflow state.
 
 - Business migration adds `auth_issuer` and `auth_subject` using raw DDL in `op.execute`.
 - Auth migration creates the identity store using raw DDL in `op.execute`.
-- Business migration `20260919_0006` removes the temporary password, Google-subject, and refresh-token
-  storage from the Business database.
-- New application profiles are provisioned from verified JWT identities; no compatibility bridge runs
-  during startup.
+- Business PostgreSQL contains no password, provider-subject, or refresh-token ledger fields.
+- New application profiles are provisioned from verified JWT identities.
 
 ## Security invariants
 
@@ -109,7 +107,6 @@ requests. The raw refresh token never enters the browser at all.
    conflicts.
 7. Back up both databases before production migrations once persistent environments exist.
 
-The application is pre-production, so there is no legacy identity bridge or compatibility window.
 Authentication records are created directly in Auth DB and Business users are provisioned from JWTs.
 
 ## What is intentionally not claimed yet
@@ -167,7 +164,7 @@ provider instead of growing an ad hoc protocol surface.
   refresh rotation/replay, logout, Google linking/cancellation, JWT claims, and public-only JWKS.
 - Business API tests cover public-route inventory, missing/invalid tokens, signature/issuer/audience/type
   validation, execution ordering, identity provisioning, deleted users, and self-only authorization.
-- Migration validation covers upgrade, downgrade, re-upgrade, and idempotent legacy import.
+- Migration validation covers upgrade, downgrade, and re-upgrade.
 - End-to-end validation covers real RS256 issuance, JWKS verification, successful business access,
   unauthenticated rejection, and tampered-token rejection.
 

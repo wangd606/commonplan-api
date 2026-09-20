@@ -229,7 +229,6 @@ Redis loses cached copies only; PostgreSQL remains authoritative.
 
 ## Identity-store boundary
 
-The application is pre-production, so the temporary legacy identity bridge has been removed. New
-accounts are created directly in Auth PostgreSQL, while the Business `users` row is provisioned from a
-verified JWT on first API use. Migration `20260919_0006` removes the former Business password,
-Google-subject, and refresh-token storage so future code has one unambiguous authentication owner.
+Accounts are created directly in Auth PostgreSQL. On first authenticated API use, the Business API
+provisions a local `users` projection from the verified JWT. Business PostgreSQL stores no passwords,
+provider subjects, or refresh-token ledger; Auth Service is the unambiguous authentication owner.

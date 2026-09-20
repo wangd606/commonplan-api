@@ -1,28 +1,25 @@
-# 00 — Current database schema and migration map
+# 00 — Current implemented schema
 
-This page is the reconciliation baseline for the design. It describes the schema that the checked-in Alembic migrations create today, then maps that physical schema to the SQLAlchemy runtime models and the target product design.
+This page is the clean implementation baseline for CommonPlan. It contains only the tables and columns that exist after applying the current migration heads:
 
-Status labels used throughout the data-model docs:
+- Auth DB: `20260910_0002`
+- Business DB: `20260919_0006`
 
-- **AS-IS / runtime** — created by a migration and mapped by the running application.
-- **AS-IS / legacy** — still exists physically after all migrations, but current runtime models no longer use it.
-- **PROPOSED** — part of the target design only; no migration or runtime model exists yet.
+`IMPLEMENTED` means the table exists in PostgreSQL and has an active SQLAlchemy runtime model. `PROPOSED` means the entity belongs to the target product design but has no migration yet.
 
-Each PostgreSQL database also contains its own Alembic-managed `alembic_version` table. It is migration infrastructure, not a CommonPlan domain entity, so it is listed here but omitted from the domain ERDs.
+Each database also contains Alembic's `alembic_version` table. It is migration infrastructure rather than a CommonPlan domain entity and is therefore omitted from the ERDs.
 
-## Auth database — physical schema after migrations
-
-Source: `auth_service/alembic/versions/20260905_0001_create_identity_store.py` and `20260910_0002_add_login_codes.py`.
+## Auth database
 
 ```mermaid
 erDiagram
     IDENTITY_USERS ||--o{ EXTERNAL_IDENTITIES : has
-    IDENTITY_USERS ||--o{ AUTH_REFRESH_TOKENS : owns
+    IDENTITY_USERS ||--o{ REFRESH_TOKENS : owns
     IDENTITY_USERS ||--o{ LOGIN_CODES : receives
 
     IDENTITY_USERS {
         varchar_36 id PK
-        varchar_320 email
+        varchar_320 email UK
         varchar_255 name
         varchar_512 password_hash
         varchar_1024 avatar_url
@@ -37,7 +34,7 @@ erDiagram
         varchar_36 user_id FK
         timestamptz created_at
     }
-    AUTH_REFRESH_TOKENS {
+    REFRESH_TOKENS {
         integer id PK
         varchar_64 token_hash UK
         varchar_36 family_id
@@ -62,11 +59,9 @@ erDiagram
     }
 ```
 
-All five tables are **AS-IS / runtime** and have corresponding classes in `auth_service/app/models.py`. `login_attempts` intentionally has no user foreign key because failed attempts can occur for an identifier that does not belong to an account. `EXTERNAL_IDENTITIES` has one composite unique constraint on `(provider, subject)`; the two `UK` labels above denote the columns participating in that constraint, not two independent unique constraints.
+`login_attempts` intentionally has no user foreign key because authentication can fail for an identifier that does not belong to an account. `external_identities` uses one composite unique constraint on `(provider, subject)`; the two `UK` badges denote participation in that constraint.
 
-## Business database — physical schema after migrations
-
-Source: all migrations in `backend/alembic/versions/` through `20260919_0006`.
+## Business database
 
 ```mermaid
 erDiagram
@@ -103,43 +98,43 @@ erDiagram
     }
 ```
 
-`users`, `application_sessions`, and `browser_auth_sessions` are **AS-IS / runtime**. Migration `20260919_0006` removes the superseded Business `refresh_tokens` table and the former `users.google_sub` and `users.password_hash` columns. The `(auth_issuer, auth_subject)` labels represent the partial composite unique index `ux_users_auth_identity`; neither column is independently unique.
+The `(auth_issuer, auth_subject)` badges denote the partial composite unique index `ux_users_auth_identity`; neither column is independently unique. `browser_auth_sessions.auth_subject` logically refers to Auth `identity_users.id`, but PostgreSQL cannot enforce that cross-database relationship. It also has no direct foreign key to Business `users`.
 
-`browser_auth_sessions.auth_subject` is a logical reference to Auth `identity_users.id`, not a database foreign key. It crosses databases. It also has no direct foreign key to Business `users`, so the diagram does not invent one.
+## Implemented table catalog
 
-## Migration-to-object inventory
-
-| Database | Revision | Physical effect | Runtime mapping | Design disposition |
-| --- | --- | --- | --- | --- |
-| Business | `20260723_0001` | Creates `users`, including historical `google_sub` | `User` omits `google_sub` | Column removed by `20260919_0006` |
-| Business | `20260801_0002` | Adds historical `users.password_hash` and case-insensitive email index | `User` omits `password_hash` | Credential column removed by `20260919_0006` |
-| Business | `20260802_0003` | Creates historical `refresh_tokens` and active `application_sessions` | Only `ApplicationSession` remains | Token table removed by `20260919_0006`; application sessions remain independent from auth |
-| Business | `20260905_0004` | Adds `users.auth_issuer`, `users.auth_subject`, and partial unique index | `User` maps both | Keep as the cross-database identity key |
-| Business | `20260910_0005` | Creates `browser_auth_sessions` | `BrowserAuthSession` | Keep as the BFF refresh-token vault |
-| Business | `20260919_0006` | Drops Business `refresh_tokens`, `users.password_hash`, and `users.google_sub` | No active ORM fields removed | Cleanup complete; Auth DB is the sole credential owner |
-| Auth | `20260905_0001` | Creates `identity_users`, `external_identities`, `refresh_tokens`, `login_attempts` | All four mapped | Keep; these are the Auth Service system of record |
-| Auth | `20260910_0002` | Creates `login_codes` | `LoginCode` | Keep for one-time BFF login exchange |
-
-## Physical table-to-design map
-
-| Physical table | Current owner and purpose | Target module | Status |
+| Database | Table | Runtime model | Responsibility |
 | --- | --- | --- | --- |
-| Auth `identity_users` | Login identity and credential owner | [Identity and profile](01-identity-profile.md) | Keep |
-| Auth `external_identities` | Google/provider account links | [Identity and profile](01-identity-profile.md) | Keep |
-| Auth `refresh_tokens` | Hashed refresh-token rotation ledger | [Identity and profile](01-identity-profile.md) | Keep |
-| Auth `login_attempts` | Identifier-based throttling/lockout state | [Identity and profile](01-identity-profile.md) | Keep |
-| Auth `login_codes` | Single-use browser/BFF code exchange | [Identity and profile](01-identity-profile.md) | Keep |
-| Business `users` | Local projection keyed by `(auth_issuer, auth_subject)` | [Identity and profile](01-identity-profile.md) and membership FKs in later modules | Keep, restrict identity-owned writes |
-| Business `application_sessions` | Durable product workflow/session data, optionally cached in Redis | [Identity and profile](01-identity-profile.md) | Keep; not an authentication credential |
-| Business `browser_auth_sessions` | Opaque-cookie lookup and encrypted refresh-token vault | [Identity and profile](01-identity-profile.md) | Keep |
+| Auth | `identity_users` | `IdentityUser` | Canonical identity, password credential, activation state, and display identity |
+| Auth | `external_identities` | `ExternalIdentity` | Google or future provider subjects linked to one identity |
+| Auth | `refresh_tokens` | `RefreshToken` | Hashed refresh-token families, rotation, expiry, revocation, and replay response |
+| Auth | `login_attempts` | `LoginAttempt` | Persistent identifier-based throttling and lockout state |
+| Auth | `login_codes` | `LoginCode` | Single-use, short-lived Auth-to-BFF code exchange |
+| Business | `users` | `User` | Application-facing user projection keyed by `(auth_issuer, auth_subject)` |
+| Business | `application_sessions` | `ApplicationSession` | Durable product workflow state with Redis as an optional read-through cache |
+| Business | `browser_auth_sessions` | `BrowserAuthSession` | Opaque-cookie lookup and encrypted refresh-token vault |
 
-## Proposed tables that do not exist yet
+## Cross-database identity mapping
 
-All new product entities introduced in modules 02–06 are **PROPOSED**; references to Business `users` reuse the existing projection table. In module 01, `user_preferences` and `notification_preferences` are also **PROPOSED**. They must not be inferred from the current ORM or database until new migrations are added.
+Auth DB is the source of truth for identity. On the first authenticated Business API request, a verified JWT supplies `(iss, sub)`. The Business API finds or provisions exactly one `users` row using `(auth_issuer, auth_subject)` and mirrors email, name, and avatar for product display.
 
-## Reconciliation findings
+Email is not the security join key. The current Business schema keeps it unique for projection consistency, while authentication and authorization continue to use the immutable issuer/subject pair.
 
-1. After all migrations, the physical domain schema contains eight tables: five in Auth DB and three in Business DB. All eight are runtime-mapped.
-2. Only Auth DB now contains `refresh_tokens`; Business DB no longer stores credentials or provider subjects.
-3. `users.email` remains physically unique even though email is no longer the authentication join key. The target ownership model should make it a read-only projection; any future relaxation of that uniqueness needs an explicit migration.
-4. `browser_auth_sessions` stores only `auth_subject`, while Business user identity uses `(auth_issuer, auth_subject)`. This works with one configured issuer, but supporting multiple issuers requires adding `auth_issuer` to the vault key/context.
+## Proposed product schema
+
+The following modules introduce `PROPOSED` entities and APIs. References to Business `users` reuse the implemented table above.
+
+| Module | Proposed scope |
+| --- | --- |
+| [01 — Identity and profile](01-identity-profile.md) | User and notification preferences |
+| [02 — Workspace and team](02-workspace-team.md) | Workspaces, teams, memberships, and invitations |
+| [03 — Work planning](03-work-planning.md) | Projects, cycles, issues, comments, events, labels, milestones, and updates |
+| [04 — Views and notifications](04-views-notifications.md) | Saved views, inbox notifications, and aggregate read models |
+| [05 — GitHub webhook](05-github-webhook.md) | Pull-request snapshots, issue links, and webhook delivery deduplication |
+| [06 — Administration](06-administration.md) | Workspace settings, allowed domains, and audit events |
+
+## Current design constraints
+
+1. Business profile writes for email, name, and avatar must flow through Auth Service and then project through JWT claims.
+2. `application_sessions` never authenticate an API caller; Business endpoints require a verified access JWT.
+3. The browser receives an opaque HttpOnly session cookie, while the raw refresh token remains encrypted in `browser_auth_sessions`.
+4. Supporting more than one accepted Auth issuer requires adding issuer context to `browser_auth_sessions`; `auth_subject` alone is currently valid because the deployment has one configured issuer.

@@ -2,20 +2,20 @@
 
 **UI:** Profile, Security & access, Connected accounts, account menu (KEY-3 pages 9, 10, 15). **Boundary:** Auth Service owns credentials and login identities; Business API owns product preferences and a read-side user projection.
 
-The exact implemented tables and columns are shown in [00 — Current schema and migration map](00-current-schema-map.md). This page describes how those records participate in the identity workflow, then isolates the two proposed personal-settings tables.
+The exact implemented tables and columns are shown in [00 — Current implemented schema](00-current-schema-map.md). This page describes how those records participate in the identity workflow, then isolates the two proposed personal-settings tables.
 
 ## Implemented identity and session responsibilities
 
 | Record | Database | Status | Responsibility |
 | --- | --- | --- | --- |
-| `identity_users` | Auth | AS-IS / runtime | Canonical identity, password hash, activation state, display identity |
-| `external_identities` | Auth | AS-IS / runtime | Google/provider subject linked to an identity |
-| `refresh_tokens` | Auth | AS-IS / runtime | Hash-only token-family rotation and replay detection |
-| `login_attempts` | Auth | AS-IS / runtime | Login throttling/lockout keyed by hashed identifier |
-| `login_codes` | Auth | AS-IS / runtime | Single-use, short-lived code exchanged by the web BFF |
-| `users` | Business | AS-IS / runtime | Lazily provisioned product user projection keyed by `(auth_issuer, auth_subject)` |
-| `application_sessions` | Business | AS-IS / runtime | Durable product workflow/session state; independent from login authentication |
-| `browser_auth_sessions` | Business | AS-IS / runtime | Server-side vault for the encrypted raw refresh token; browser holds only an opaque HttpOnly cookie |
+| `identity_users` | Auth | IMPLEMENTED | Canonical identity, password hash, activation state, display identity |
+| `external_identities` | Auth | IMPLEMENTED | Google/provider subject linked to an identity |
+| `refresh_tokens` | Auth | IMPLEMENTED | Hash-only token-family rotation and replay detection |
+| `login_attempts` | Auth | IMPLEMENTED | Login throttling/lockout keyed by hashed identifier |
+| `login_codes` | Auth | IMPLEMENTED | Single-use, short-lived code exchanged by the web BFF |
+| `users` | Business | IMPLEMENTED | Lazily provisioned product user projection keyed by `(auth_issuer, auth_subject)` |
+| `application_sessions` | Business | IMPLEMENTED | Durable product workflow/session state; independent from login authentication |
+| `browser_auth_sessions` | Business | IMPLEMENTED | Server-side vault for the encrypted raw refresh token; browser holds only an opaque HttpOnly cookie |
 
 The Auth `identity_users` to Business `users` relationship is logical only: a JWT `(iss, sub)` causes the Business API to find or provision one local user. There is no cross-database foreign key.
 
@@ -69,18 +69,18 @@ erDiagram
 | `GET /api/v1/me` | PROPOSED | JWT required; returns Business user, accessible workspaces, and preference defaults. Does not list all users globally. |
 | `PATCH /api/v1/me/preferences` | PROPOSED | Self-only; update timezone, locale, theme, default workspace/team. Reject inaccessible defaults. |
 | `GET /api/v1/me/notification-preferences` / `PUT ...` | PROPOSED | Self-only; effective notification switches. |
-| `GET /auth/me` | AS-IS / runtime | Return the current Auth identity. |
+| `GET /auth/me` | IMPLEMENTED | Return the current Auth identity. |
 | `PATCH /auth/me` | PROPOSED | Update identity-owned display name, email, or avatar. Email change requires verification. |
 | `GET /auth/identities`, `DELETE /auth/identities/{provider}` | PROPOSED | List/disconnect Google; reject disconnecting the last usable login method. |
 | `GET /auth/sessions`, `DELETE /auth/sessions/{id}` | PROPOSED | Derive device sessions from refresh families/BFF sessions and revoke a selected session. |
 
 The account-menu actions “Switch workspace” and “Log out” do not need their own product tables: workspace selection is client navigation plus a preference, while logout revokes the current browser/auth session.
 
-## Required implementation reconciliation
+## Implementation requirements
 
 1. Keep identity-owned email/name changes in Auth Service. The current Business `PATCH /users/{id}` can be overwritten by the next JWT projection and should not serve as the profile-edit endpoint.
-2. Migration `20260919_0006` removes the superseded Business `refresh_tokens`, `users.password_hash`, and `users.google_sub` storage. Do not reintroduce credential fields into Business models.
-3. Treat Business `users.email` as a read-only projection. It is physically unique today, but it is not the authentication join key.
+2. Treat Business `users.email` as a read-only projection. It is physically unique today, but it is not the authentication join key.
+3. Do not add password, provider-subject, or token-ledger fields to Business models; Auth Service owns those records.
 4. If more than one Auth issuer will be accepted, add `auth_issuer` to `browser_auth_sessions`; `auth_subject` alone is only unambiguous under the current single-issuer deployment.
 
 ## Later, not silently in P0
