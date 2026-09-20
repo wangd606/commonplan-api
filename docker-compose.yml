@@ -59,20 +59,6 @@ services:
       db-init:
         condition: service_completed_successfully
 
-  identity-migrate:
-    build:
-      context: ./auth_service
-    environment:
-      DATABASE_URL: ${AUTH_DATABASE_URL:-postgresql+psycopg://zhitong:zhitong@db:5432/zhitong_auth}
-      LEGACY_DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://zhitong:zhitong@db:5432/zhitong}
-      ISSUER: ${AUTH_ISSUER:-http://localhost:8001}
-    command: ["python", "-m", "app.legacy_migration"]
-    depends_on:
-      backend-migrate:
-        condition: service_completed_successfully
-      auth-migrate:
-        condition: service_completed_successfully
-
   auth-service:
     build:
       context: ./auth_service
@@ -108,7 +94,7 @@ services:
       - ./auth_service/alembic.ini:/app/alembic.ini
       - auth_signing_keys:/var/lib/zhitong-auth/keys
     depends_on:
-      identity-migrate:
+      auth-migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
@@ -145,7 +131,7 @@ services:
       - ./backend/alembic:/app/alembic
       - ./backend/alembic.ini:/app/alembic.ini
     depends_on:
-      identity-migrate:
+      backend-migrate:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy

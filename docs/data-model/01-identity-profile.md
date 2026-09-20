@@ -16,7 +16,6 @@ The exact implemented tables and columns are shown in [00 — Current schema and
 | `users` | Business | AS-IS / runtime | Lazily provisioned product user projection keyed by `(auth_issuer, auth_subject)` |
 | `application_sessions` | Business | AS-IS / runtime | Durable product workflow/session state; independent from login authentication |
 | `browser_auth_sessions` | Business | AS-IS / runtime | Server-side vault for the encrypted raw refresh token; browser holds only an opaque HttpOnly cookie |
-| `refresh_tokens` | Business | AS-IS / legacy | Superseded table from before Auth Service extraction; not runtime-mapped |
 
 The Auth `identity_users` to Business `users` relationship is logical only: a JWT `(iss, sub)` causes the Business API to find or provision one local user. There is no cross-database foreign key.
 
@@ -80,7 +79,7 @@ The account-menu actions “Switch workspace” and “Log out” do not need th
 ## Required implementation reconciliation
 
 1. Keep identity-owned email/name changes in Auth Service. The current Business `PATCH /users/{id}` can be overwritten by the next JWT projection and should not serve as the profile-edit endpoint.
-2. Add a cleanup migration only after deciding rollback/data-retention policy for Business `refresh_tokens`, `users.password_hash`, and `users.google_sub`. Their absence from ORM models does not remove them from PostgreSQL.
+2. Migration `20260919_0006` removes the superseded Business `refresh_tokens`, `users.password_hash`, and `users.google_sub` storage. Do not reintroduce credential fields into Business models.
 3. Treat Business `users.email` as a read-only projection. It is physically unique today, but it is not the authentication join key.
 4. If more than one Auth issuer will be accepted, add `auth_issuer` to `browser_auth_sessions`; `auth_subject` alone is only unambiguous under the current single-issuer deployment.
 

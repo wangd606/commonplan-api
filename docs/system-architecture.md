@@ -75,8 +75,9 @@ email. Email is a mutable display/contact attribute, not the security identifier
 | Browser memory | short-lived access JWT | Bearer authentication to Business API |
 | Browser HTTP-only cookie | opaque rotating BFF session id | Select a server-side refresh credential without exposing it |
 
-The existing `users.password_hash`, `users.google_sub`, and legacy refresh-token table remain only as
-rollback-compatible migration inputs. Runtime Business API models do not expose or read them.
+Authentication storage exists only in the Auth Service database. The Business database contains the
+application-facing user projection, browser-session vault, and independent application sessions; it
+does not retain password hashes, provider subjects, or refresh-token ledger rows.
 
 ## Password registration and login
 
@@ -226,18 +227,9 @@ Application sessions answer questions such as which onboarding step, draft, filt
 active. They never identify the API caller and are never accepted in place of a bearer token. Clearing
 Redis loses cached copies only; PostgreSQL remains authoritative.
 
-## Legacy identity cutover
+## Identity-store boundary
 
-```mermaid
-flowchart LR
-    appLegacy[(Legacy users credentials)] --> bridge[Idempotent identity-migrate job]
-    bridge --> authdb[(Auth identity records)]
-    bridge --> links[Write auth issuer and subject links]
-    links --> appdb[(Business profiles)]
-    oldRefresh[(Legacy refresh sessions)] -.->|Not migrated| relogin[One required sign-in]
-```
-
-The migration job can be rerun safely and uses deterministic subjects for imported users. It copies
-existing Argon2 hashes without resetting passwords. Keeping the old columns during the compatibility
-window makes rollback possible; after production verification, a later raw-SQL migration should erase
-the duplicate credential columns and legacy refresh-token table.
+The application is pre-production, so the temporary legacy identity bridge has been removed. New
+accounts are created directly in Auth PostgreSQL, while the Business `users` row is provisioned from a
+verified JWT on first API use. Migration `20260919_0006` removes the former Business password,
+Google-subject, and refresh-token storage so future code has one unambiguous authentication owner.

@@ -66,35 +66,22 @@ All five tables are **AS-IS / runtime** and have corresponding classes in `auth_
 
 ## Business database — physical schema after migrations
 
-Source: all migrations in `backend/alembic/versions/` through `20260910_0005`.
+Source: all migrations in `backend/alembic/versions/` through `20260919_0006`.
 
 ```mermaid
 erDiagram
-    USERS ||--o{ LEGACY_REFRESH_TOKENS : owned
     USERS ||--o{ APPLICATION_SESSIONS : may_own
 
     USERS {
         integer id PK
         varchar_255 email UK
         varchar_255 name
-        varchar_255 google_sub UK
         varchar_1024 avatar_url
         boolean is_deleted
         timestamptz created_at
         timestamptz updated_at
-        varchar_512 password_hash
         varchar_255 auth_issuer UK
         varchar_255 auth_subject UK
-    }
-    LEGACY_REFRESH_TOKENS {
-        integer id PK
-        varchar_64 token_hash UK
-        varchar_36 family_id
-        integer user_id FK
-        timestamptz expires_at
-        timestamptz revoked_at
-        varchar_64 replaced_by_hash
-        timestamptz created_at
     }
     APPLICATION_SESSIONS {
         integer id PK
@@ -116,9 +103,7 @@ erDiagram
     }
 ```
 
-`users`, `application_sessions`, and `browser_auth_sessions` are **AS-IS / runtime**. The Business database `refresh_tokens` table is **AS-IS / legacy**: migration `20260802_0003` created it before token ownership moved to Auth Service, but `backend/app/models.py` no longer maps or reads it.
-
-The physical `users` table still contains **legacy** `google_sub` and `password_hash` columns and their historical indexes. Current Business ORM intentionally omits both because credentials and external identities now belong to Auth Service. The `(auth_issuer, auth_subject)` labels represent the partial composite unique index `ux_users_auth_identity`; neither column is independently unique.
+`users`, `application_sessions`, and `browser_auth_sessions` are **AS-IS / runtime**. Migration `20260919_0006` removes the superseded Business `refresh_tokens` table and the former `users.google_sub` and `users.password_hash` columns. The `(auth_issuer, auth_subject)` labels represent the partial composite unique index `ux_users_auth_identity`; neither column is independently unique.
 
 `browser_auth_sessions.auth_subject` is a logical reference to Auth `identity_users.id`, not a database foreign key. It crosses databases. It also has no direct foreign key to Business `users`, so the diagram does not invent one.
 
@@ -126,11 +111,12 @@ The physical `users` table still contains **legacy** `google_sub` and `password_
 
 | Database | Revision | Physical effect | Runtime mapping | Design disposition |
 | --- | --- | --- | --- | --- |
-| Business | `20260723_0001` | Creates `users`, including `google_sub` | `User` maps all except `google_sub` | Keep `users` as identity projection; retire `google_sub` after migration verification |
-| Business | `20260801_0002` | Adds `users.password_hash` and case-insensitive email index | `User` omits `password_hash` | Retire credential column; Auth DB owns it |
-| Business | `20260802_0003` | Creates `refresh_tokens` and `application_sessions` | Only `ApplicationSession` remains | Drop legacy Business `refresh_tokens` in a future cleanup migration; keep application sessions independent from auth |
+| Business | `20260723_0001` | Creates `users`, including historical `google_sub` | `User` omits `google_sub` | Column removed by `20260919_0006` |
+| Business | `20260801_0002` | Adds historical `users.password_hash` and case-insensitive email index | `User` omits `password_hash` | Credential column removed by `20260919_0006` |
+| Business | `20260802_0003` | Creates historical `refresh_tokens` and active `application_sessions` | Only `ApplicationSession` remains | Token table removed by `20260919_0006`; application sessions remain independent from auth |
 | Business | `20260905_0004` | Adds `users.auth_issuer`, `users.auth_subject`, and partial unique index | `User` maps both | Keep as the cross-database identity key |
 | Business | `20260910_0005` | Creates `browser_auth_sessions` | `BrowserAuthSession` | Keep as the BFF refresh-token vault |
+| Business | `20260919_0006` | Drops Business `refresh_tokens`, `users.password_hash`, and `users.google_sub` | No active ORM fields removed | Cleanup complete; Auth DB is the sole credential owner |
 | Auth | `20260905_0001` | Creates `identity_users`, `external_identities`, `refresh_tokens`, `login_attempts` | All four mapped | Keep; these are the Auth Service system of record |
 | Auth | `20260910_0002` | Creates `login_codes` | `LoginCode` | Keep for one-time BFF login exchange |
 
@@ -144,7 +130,6 @@ The physical `users` table still contains **legacy** `google_sub` and `password_
 | Auth `login_attempts` | Identifier-based throttling/lockout state | [Identity and profile](01-identity-profile.md) | Keep |
 | Auth `login_codes` | Single-use browser/BFF code exchange | [Identity and profile](01-identity-profile.md) | Keep |
 | Business `users` | Local projection keyed by `(auth_issuer, auth_subject)` | [Identity and profile](01-identity-profile.md) and membership FKs in later modules | Keep, restrict identity-owned writes |
-| Business `refresh_tokens` | Superseded pre-extraction token ledger | No target module | Legacy; remove after rollback/data-retention decision |
 | Business `application_sessions` | Durable product workflow/session data, optionally cached in Redis | [Identity and profile](01-identity-profile.md) | Keep; not an authentication credential |
 | Business `browser_auth_sessions` | Opaque-cookie lookup and encrypted refresh-token vault | [Identity and profile](01-identity-profile.md) | Keep |
 
@@ -154,8 +139,7 @@ All new product entities introduced in modules 02–06 are **PROPOSED**; referen
 
 ## Reconciliation findings
 
-1. The previous design diagram omitted `login_attempts`, `application_sessions`, `browser_auth_sessions`, and the legacy Business `refresh_tokens` table. This page now accounts for all nine physical domain tables.
-2. The database contains two different tables named `refresh_tokens`. Only the Auth DB version is active. Qualify the database whenever discussing this table.
-3. The Business ORM is not a complete physical-schema description because it deliberately omits the legacy table and columns. Alembic migrations are the current physical source of truth.
-4. `users.email` remains physically unique even though email is no longer the authentication join key. The target ownership model should make it a read-only projection; any future relaxation of that uniqueness needs an explicit migration.
-5. `browser_auth_sessions` stores only `auth_subject`, while Business user identity uses `(auth_issuer, auth_subject)`. This works with one configured issuer, but supporting multiple issuers requires adding `auth_issuer` to the vault key/context.
+1. After all migrations, the physical domain schema contains eight tables: five in Auth DB and three in Business DB. All eight are runtime-mapped.
+2. Only Auth DB now contains `refresh_tokens`; Business DB no longer stores credentials or provider subjects.
+3. `users.email` remains physically unique even though email is no longer the authentication join key. The target ownership model should make it a read-only projection; any future relaxation of that uniqueness needs an explicit migration.
+4. `browser_auth_sessions` stores only `auth_subject`, while Business user identity uses `(auth_issuer, auth_subject)`. This works with one configured issuer, but supporting multiple issuers requires adding `auth_issuer` to the vault key/context.

@@ -84,4 +84,4 @@ If cross-team projects, guest access, or one GitHub organization shared by multi
 
 ## Existing implementation gap
 
-Today `backend/app/main.py` exposes only authenticated user routes; the proposed product entities below do not exist. The exact nine-table physical inventory, including legacy objects omitted by the ORM, is in [00 — Current schema map](00-current-schema-map.md). `PATCH /users/{id}` currently mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT. Before shipping profile editing, move identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.
+Today `backend/app/main.py` exposes only authenticated user routes; the proposed product entities below do not exist. The exact eight-table physical inventory is in [00 — Current schema map](00-current-schema-map.md). `PATCH /users/{id}` currently mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT. Before shipping profile editing, move identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.
