@@ -54,15 +54,12 @@ do to this resource**. Application sessions hold non-credential workflow state.
 - Mutating another user's profile fails with `403`; this is the initial resource-authorization policy.
 - OpenAPI inventory tests guard against accidentally adding an unprotected business operation.
 
-### 5. Cutover and compatibility
+### 5. Storage boundary
 
 - Business migration adds `auth_issuer` and `auth_subject` using raw DDL in `op.execute`.
 - Auth migration creates the identity store using raw DDL in `op.execute`.
-- An idempotent bridge copies existing password hashes and Google subjects, then links application
-  profiles to imported identities.
-- Existing refresh sessions are intentionally invalidated at cutover; users sign in once again.
-- Legacy credential columns stay untouched during the rollback window, but runtime code no longer maps
-  them.
+- Business PostgreSQL contains no password, provider-subject, or refresh-token ledger fields.
+- New application profiles are provisioned from verified JWT identities.
 
 ## Security invariants
 
@@ -100,23 +97,17 @@ requests. The raw refresh token never enters the browser at all.
 
 ## Deployment sequence
 
-1. Back up both databases and configure stable issuer/audience values.
-2. Create `zhitong_auth` and apply Auth Service migration.
-3. Apply Business API identity-link migration.
-4. Run the idempotent identity bridge and verify row/link counts.
-5. Start Auth Service and verify health plus JWKS.
-6. Start Business API with the internal JWKS URL and public issuer value.
-7. Start React with the Business API/BFF base URL; the browser reaches Auth Service only for the
+1. Configure stable issuer/audience values.
+2. Create both databases and apply the Auth Service and Business API migrations.
+3. Start Auth Service and verify health plus JWKS.
+4. Start Business API with the internal JWKS URL and public issuer value.
+5. Start React with the Business API/BFF base URL; the browser reaches Auth Service only for the
    Google redirect flow.
-8. Require users to sign in again; do not copy old refresh credentials.
-9. Monitor authentication errors, JWKS availability, login throttles, refresh replay, and identity-link
+6. Monitor authentication errors, JWKS availability, login throttles, refresh replay, and identity-link
    conflicts.
-10. After the rollback window, create a separate reviewed migration to drop legacy credential storage.
+7. Back up both databases before production migrations once persistent environments exist.
 
-Rollback before step 10 is straightforward: stop the new services, restore the old application
-version, and downgrade the identity-link columns if desired. Dropping the Auth database deletes the
-newly created identity/refresh state, so it should happen only after a backup and an explicit rollback
-decision.
+Authentication records are created directly in Auth DB and Business users are provisioned from JWTs.
 
 ## What is intentionally not claimed yet
 
@@ -173,7 +164,7 @@ provider instead of growing an ad hoc protocol surface.
   refresh rotation/replay, logout, Google linking/cancellation, JWT claims, and public-only JWKS.
 - Business API tests cover public-route inventory, missing/invalid tokens, signature/issuer/audience/type
   validation, execution ordering, identity provisioning, deleted users, and self-only authorization.
-- Migration validation covers upgrade, downgrade, re-upgrade, and idempotent legacy import.
+- Migration validation covers upgrade, downgrade, and re-upgrade.
 - End-to-end validation covers real RS256 issuance, JWKS verification, successful business access,
   unauthenticated rejection, and tampered-token rejection.
 

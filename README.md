@@ -33,4 +33,4 @@ cd backend && pytest -q
 cd ../auth_service && pytest -q
 ```
 
-See [`docs/system-architecture.md`](docs/system-architecture.md) and [`docs/auth-service-plan.md`](docs/auth-service-plan.md) for the current architecture and authentication flows.
+See [`docs/system-architecture.md`](docs/system-architecture.md) and [`docs/auth-service-plan.md`](docs/auth-service-plan.md) for the current architecture and authentication flows. Product data/API design starts at [`docs/data-model/README.md`](docs/data-model/README.md), and the staged implementation plan is in [`docs/implementation/milestones.md`](docs/implementation/milestones.md).
