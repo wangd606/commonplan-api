@@ -122,6 +122,9 @@ def bearer(token: str = "valid-token") -> dict[str, str]:
 def test_health_and_bff_auth_are_public_but_business_api_is_not():
     assert client.get("/health").status_code == 200
     assert client.get("/auth/google/status").status_code == 200
+    google_login = client.get("/auth/google/login", follow_redirects=False)
+    assert google_login.status_code == 307
+    assert google_login.headers["location"].endswith("/auth/google/login")
     assert client.post("/auth/login", json={}).status_code == 422
 
 
@@ -186,6 +189,18 @@ def test_bff_rejects_cross_site_auth_requests_and_clears_invalid_session():
         ("get", "/users/1", None),
         ("patch", "/users/1", {"name": "Updated User"}),
         ("delete", "/users/1", None),
+        ("get", "/api/v1/workspaces", None),
+        ("post", "/api/v1/workspaces", {"name": "Acme", "slug": "acme"}),
+        ("get", "/api/v1/workspaces/workspace-1/teams", None),
+        ("post", "/api/v1/workspaces/workspace-1/teams", {"name": "Core", "issue_prefix": "CORE"}),
+        ("get", "/api/v1/workspaces/workspace-1/teams/team-1/workflow-states", None),
+        ("get", "/api/v1/workspaces/workspace-1/teams/team-1/cycles", None),
+        ("get", "/api/v1/workspaces/workspace-1/teams/team-1/labels", None),
+        ("get", "/api/v1/workspaces/workspace-1/teams/team-1/issues", None),
+        ("get", "/api/v1/workspaces/workspace-1/issues/CORE-1", None),
+        ("get", "/api/v1/workspaces/workspace-1/issues/CORE-1/activity", None),
+        ("post", "/api/v1/workspaces/workspace-1/issues/CORE-1/comments", {"body": "Hello"}),
+        ("get", "/api/v1/me/issues", None),
     ],
 )
 def test_every_business_route_requires_access_token(method, path, json_body):
