@@ -84,6 +84,6 @@ If cross-team projects, guest access, or one GitHub organization shared by multi
 - `POST /webhooks/github` is the sole non-user-JWT product entry point and requires the GitHub HMAC signature, an allowed organization, and delivery-id deduplication.
 - Never place passwords, Google tokens, raw refresh tokens, or webhook secrets in product-response schemas. The Business API only mirrors Auth Service identity fields for display and authorization linkage.
 
-## Existing implementation gap
+## Remaining implementation gaps
 
-Today `backend/app/main.py` exposes only authenticated user routes; the proposed product entities below do not exist. The eight implemented domain tables are in [00 — Current implemented schema](00-current-schema-map.md). `PATCH /users/{id}` currently mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT. Before shipping profile editing, move identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.
+M0–M3 now provide the Auth boundary, workspace/team access, issue planning, and project planning described above. Modules 04–06 remain staged work. `PATCH /users/{id}` still mutates local email/name, but `UserService.provision_identity()` overwrites them from the next JWT; before shipping profile editing, route identity-owned changes through Auth Service and restrict the Business API to preferences and product profile data.

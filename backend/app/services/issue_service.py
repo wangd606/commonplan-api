@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
 
-from app.models import Cycle, Issue, IssueComment, IssueEvent, Label, User
+from app.models import Cycle, Issue, IssueComment, IssueEvent, Label, Project, User
 from app.repositories.issue_repository import IssueRepository, IssueRepositoryDep
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
 
@@ -69,7 +69,10 @@ class IssueService:
         state = self.repository.state(state_id) if state_id else self.repository.default_state(team_id)
         if state is None or state.team_id != team_id:
             raise IssueValidationError("Workflow state must belong to the selected team")
-        self._validate_refs(team_id, values.get("assignee_user_id"), values.get("cycle_id"), values.get("label_ids", []))
+        self._validate_refs(
+            team_id, values.get("assignee_user_id"), values.get("cycle_id"),
+            values.get("label_ids", []), values.get("project_id"), values.get("milestone_id"),
+        )
         number = team.next_issue_number
         team.next_issue_number += 1
         issue = Issue(
@@ -79,6 +82,7 @@ class IssueService:
             workflow_state_id=state.id, priority=values.get("priority", 0),
             creator_user_id=user.id, assignee_user_id=values.get("assignee_user_id"),
             cycle_id=values.get("cycle_id"), due_date=values.get("due_date"),
+            project_id=values.get("project_id"), milestone_id=values.get("milestone_id"),
             position=Decimal(number), version=1,
         )
         self.repository.add(issue)
@@ -116,7 +120,12 @@ class IssueService:
             state = self.repository.state(state_id)
             if state is None or state.team_id != issue.team_id:
                 raise IssueValidationError("Workflow state must belong to the selected team")
-        self._validate_refs(issue.team_id, changes.get("assignee_user_id"), changes.get("cycle_id"), label_ids or [])
+        project_id = changes.get("project_id", issue.project_id)
+        milestone_id = changes.get("milestone_id", issue.milestone_id)
+        self._validate_refs(
+            issue.team_id, changes.get("assignee_user_id"), changes.get("cycle_id"),
+            label_ids or [], project_id, milestone_id,
+        )
         event_changes = {}
         for field, value in changes.items():
             old_value = getattr(issue, field)
@@ -188,6 +197,7 @@ class IssueService:
         return visible
 
     def team_overview(self, user: User, workspace_id: str, team_id: str):
+        from sqlalchemy import func, select
         self._access(user, workspace_id, team_id)
         issues = self.repository.issues(team_id)
         state_categories = {
@@ -204,6 +214,11 @@ class IssueService:
         )
         return {
             "team_id": team_id,
+            "project_count": self.repository.db.scalar(
+                select(func.count()).select_from(Project).where(
+                    Project.team_id == team_id, Project.archived_at.is_(None)
+                )
+            ) or 0,
             "open_issue_count": sum(
                 state_categories.get(issue.workflow_state_id) not in {"done", "canceled"}
                 for issue in issues
@@ -237,7 +252,7 @@ class IssueService:
                 raise IssueNotFound from exc
             raise IssueForbidden from exc
 
-    def _validate_refs(self, team_id, assignee_user_id, cycle_id, label_ids):
+    def _validate_refs(self, team_id, assignee_user_id, cycle_id, label_ids, project_id=None, milestone_id=None):
         if assignee_user_id is not None and self.workspaces.repository.team_membership(team_id, assignee_user_id) is None:
             raise IssueValidationError("Assignee must be an active team member")
         if cycle_id is not None:
@@ -248,6 +263,13 @@ class IssueService:
             label = self.repository.label(label_id)
             if label is None or label.team_id != team_id:
                 raise IssueValidationError("Label must belong to the selected team")
+        project = self.repository.project(project_id) if project_id is not None else None
+        if project_id is not None and (project is None or project.team_id != team_id):
+            raise IssueValidationError("Project must belong to the selected team")
+        if milestone_id is not None:
+            milestone = self.repository.milestone(milestone_id)
+            if milestone is None or milestone.project_id != project_id:
+                raise IssueValidationError("Milestone must belong to the selected project")
 
     def _event(self, issue: Issue, user: User | None, event_type: str, changes: dict):
         self.repository.add(IssueEvent(

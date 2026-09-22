@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import DbSession
-from app.models import Cycle, Issue, IssueComment, IssueEvent, IssueLabel, Label, Team, User, WorkflowState
+from app.models import Cycle, Issue, IssueComment, IssueEvent, IssueLabel, Label, Project, ProjectMilestone, Team, User, WorkflowState
 
 
 class IssueRepository(Protocol):
@@ -18,6 +18,8 @@ class IssueRepository(Protocol):
     def cycle(self, cycle_id: str) -> Cycle | None: ...
     def labels(self, team_id: str) -> list[Label]: ...
     def label(self, label_id: str) -> Label | None: ...
+    def project(self, project_id: str) -> Project | None: ...
+    def milestone(self, milestone_id: str) -> ProjectMilestone | None: ...
     def issue(self, workspace_id: str, key: str, *, for_update: bool = False) -> Issue | None: ...
     def issues(self, team_id: str, **filters) -> list[Issue]: ...
     def issue_labels(self, issue_id: str) -> list[Label]: ...
@@ -58,6 +60,12 @@ class SqlAlchemyIssueRepository:
     def label(self, label_id: str) -> Label | None:
         return self.db.get(Label, label_id)
 
+    def project(self, project_id: str) -> Project | None:
+        return self.db.get(Project, project_id)
+
+    def milestone(self, milestone_id: str) -> ProjectMilestone | None:
+        return self.db.get(ProjectMilestone, milestone_id)
+
     def issue(self, workspace_id: str, key: str, *, for_update: bool = False) -> Issue | None:
         stmt = select(Issue).where(Issue.workspace_id == workspace_id, Issue.key == key)
         if for_update:
@@ -70,6 +78,8 @@ class SqlAlchemyIssueRepository:
             stmt = stmt.where(Issue.workflow_state_id == filters["workflow_state_id"])
         if filters.get("cycle_id"):
             stmt = stmt.where(Issue.cycle_id == filters["cycle_id"])
+        if filters.get("project_id"):
+            stmt = stmt.where(Issue.project_id == filters["project_id"])
         if filters.get("priority") is not None:
             stmt = stmt.where(Issue.priority == filters["priority"])
         if filters.get("assignee_user_id"):

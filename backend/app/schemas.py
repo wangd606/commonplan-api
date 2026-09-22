@@ -191,6 +191,8 @@ class IssueCreate(BaseModel):
     priority: int = Field(default=0, ge=0, le=4)
     assignee_user_id: int | None = None
     cycle_id: str | None = None
+    project_id: str | None = None
+    milestone_id: str | None = None
     due_date: date | None = None
     label_ids: list[str] = Field(default_factory=list, max_length=20)
 
@@ -203,6 +205,8 @@ class IssueUpdate(BaseModel):
     priority: int | None = Field(default=None, ge=0, le=4)
     assignee_user_id: int | None = None
     cycle_id: str | None = None
+    project_id: str | None = None
+    milestone_id: str | None = None
     due_date: date | None = None
     label_ids: list[str] | None = Field(default=None, max_length=20)
 
@@ -222,6 +226,8 @@ class IssueRead(BaseModel):
     creator_user_id: int
     assignee_user_id: int | None
     cycle_id: str | None
+    project_id: str | None
+    milestone_id: str | None
     due_date: date | None
     version: int
     labels: list[LabelRead]
@@ -251,3 +257,113 @@ class IssueActivityRead(BaseModel):
     changes: dict = Field(default_factory=dict)
     created_at: datetime
     edited_at: datetime | None = None
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=80)
+    summary: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=50000)
+    status: str = "planned"
+    lead_user_id: int | None = None
+    target_date: date | None = None
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    summary: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=50000)
+    status: str | None = None
+    lead_user_id: int | None = None
+    target_date: date | None = None
+
+
+class ProjectObjectiveCreate(BaseModel):
+    kind: str
+    body: str = Field(min_length=1, max_length=10000)
+    position: int = Field(default=0, ge=0)
+
+
+class ProjectObjectivePatch(BaseModel):
+    body: str | None = Field(default=None, min_length=1, max_length=10000)
+    position: int | None = Field(default=None, ge=0)
+    is_met: bool | None = None
+
+
+class ProjectObjectiveRead(BaseModel):
+    id: str
+    project_id: str
+    kind: str
+    body: str
+    position: int
+    is_met: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectMilestoneCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=10000)
+    status: str = "planned"
+    target_date: date | None = None
+    position: int = Field(default=0, ge=0)
+
+
+class ProjectMilestonePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=10000)
+    status: str | None = None
+    target_date: date | None = None
+    position: int | None = Field(default=None, ge=0)
+
+
+class ProjectMilestoneRead(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    description: str | None
+    status: str
+    target_date: date | None
+    position: int
+    issue_count: int = 0
+    completed_issue_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectStatusUpdateCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=20000)
+    health: str | None = None
+
+
+class ProjectStatusUpdateRead(BaseModel):
+    id: str
+    project_id: str
+    author_user_id: int
+    author_name: str | None
+    body: str
+    health: str | None
+    created_at: datetime
+    edited_at: datetime | None
+
+
+class ProjectRead(BaseModel):
+    id: str
+    team_id: str
+    name: str
+    slug: str
+    summary: str | None
+    description: str | None
+    status: str
+    lead_user_id: int | None
+    target_date: date | None
+    issue_count: int
+    completed_issue_count: int
+    progress_percent: int
+    objectives: list[ProjectObjectiveRead] = Field(default_factory=list)
+    milestones: list[ProjectMilestoneRead] = Field(default_factory=list)
+    updates: list[ProjectStatusUpdateRead] = Field(default_factory=list)
+    linked_issues: list[IssueRead] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime

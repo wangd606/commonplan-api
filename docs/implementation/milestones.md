@@ -97,6 +97,8 @@ Exit demo:
 
 ## M3 — Projects
 
+**Status:** implemented locally on `codex/m3-projects`; automated validation is complete and browser acceptance remains before publication.
+
 Scope:
 
 - Add `projects`, `project_objectives`, `project_updates`, and `project_milestones`.

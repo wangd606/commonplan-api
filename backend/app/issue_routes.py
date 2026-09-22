@@ -34,6 +34,7 @@ def _issue_read(service, issue, labels) -> IssueRead:
         workflow_category=state.category, priority=issue.priority,
         creator_user_id=issue.creator_user_id, assignee_user_id=issue.assignee_user_id,
         cycle_id=issue.cycle_id, due_date=issue.due_date, version=issue.version,
+        project_id=issue.project_id, milestone_id=issue.milestone_id,
         labels=[LabelRead.model_validate(label) for label in labels],
         created_at=issue.created_at, updated_at=issue.updated_at,
     )
@@ -82,13 +83,13 @@ def create_label(workspace_id: str, team_id: str, payload: LabelCreate, current_
 @router.get("/workspaces/{workspace_id}/teams/{team_id}/issues", response_model=list[IssueRead])
 def list_issues(
     workspace_id: str, team_id: str, current_user: CurrentUser, service: IssueServiceDep,
-    workflow_state_id: str | None = None, cycle_id: str | None = None,
+    workflow_state_id: str | None = None, cycle_id: str | None = None, project_id: str | None = None,
     priority: int | None = Query(default=None, ge=0, le=4), assignee_user_id: int | None = None,
 ):
     try:
         rows = service.list_issues(
             current_user, workspace_id, team_id, workflow_state_id=workflow_state_id,
-            cycle_id=cycle_id, priority=priority, assignee_user_id=assignee_user_id,
+            cycle_id=cycle_id, project_id=project_id, priority=priority, assignee_user_id=assignee_user_id,
         )
         return [_issue_read(service, issue, labels) for issue, labels in rows]
     except (IssueNotFound, IssueForbidden) as exc:

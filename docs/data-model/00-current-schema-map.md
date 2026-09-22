@@ -3,7 +3,7 @@
 This page is the clean implementation baseline for CommonPlan. It contains only the tables and columns that exist after applying the current migration heads:
 
 - Auth DB: `20260910_0002`
-- Business DB: `20260920_0009`
+- Business DB: `20260921_0010`
 
 `IMPLEMENTED` means the table exists in PostgreSQL and has an active SQLAlchemy runtime model. `PROPOSED` means the entity belongs to the target product design but has no migration yet.
 
@@ -75,6 +75,12 @@ erDiagram
     TEAMS ||--o{ CYCLES : plans
     TEAMS ||--o{ LABELS : defines
     TEAMS ||--o{ ISSUES : owns
+    TEAMS ||--o{ PROJECTS : owns
+    PROJECTS ||--o{ PROJECT_OBJECTIVES : defines
+    PROJECTS ||--o{ PROJECT_MILESTONES : plans
+    PROJECTS ||--o{ PROJECT_UPDATES : reports
+    PROJECTS |o--o{ ISSUES : groups
+    PROJECT_MILESTONES |o--o{ ISSUES : tracks
     WORKFLOW_STATES ||--o{ ISSUES : classifies
     CYCLES ||--o{ ISSUES : groups
     ISSUES ||--o{ ISSUE_LABELS : tagged
@@ -143,6 +149,36 @@ erDiagram
         varchar_80 name
         varchar_16 color
     }
+    PROJECTS {
+        varchar_36 id PK
+        varchar_36 team_id FK
+        varchar_255 name
+        varchar_80 slug
+        varchar_24 status
+        integer lead_user_id FK
+        date target_date
+    }
+    PROJECT_OBJECTIVES {
+        varchar_36 id PK
+        varchar_36 project_id FK
+        varchar_24 kind
+        text body
+        boolean is_met
+    }
+    PROJECT_MILESTONES {
+        varchar_36 id PK
+        varchar_36 project_id FK
+        varchar_255 name
+        varchar_24 status
+        date target_date
+    }
+    PROJECT_UPDATES {
+        varchar_36 id PK
+        varchar_36 project_id FK
+        integer author_user_id FK
+        text body
+        varchar_24 health
+    }
     ISSUES {
         varchar_36 id PK
         varchar_36 workspace_id FK
@@ -150,6 +186,8 @@ erDiagram
         varchar_32 key UK
         varchar_500 title
         varchar_36 workflow_state_id FK
+        varchar_36 project_id FK
+        varchar_36 milestone_id FK
         integer version
     }
     ISSUE_LABELS {
@@ -203,6 +241,10 @@ The `(auth_issuer, auth_subject)` badges denote the partial composite unique ind
 | Business | `workflow_states` | `WorkflowState` | Team-owned issue workflow states and categories |
 | Business | `cycles` | `Cycle` | Non-overlapping team planning windows |
 | Business | `labels` | `Label` | Team-owned issue labels |
+| Business | `projects` | `Project` | Team-owned project brief, status, lead, and target date |
+| Business | `project_objectives` | `ProjectObjective` | Ordered objectives and measurable success criteria |
+| Business | `project_milestones` | `ProjectMilestone` | Ordered project delivery checkpoints with derived issue progress |
+| Business | `project_updates` | `ProjectUpdate` | Authored project health and status history |
 | Business | `issues` | `Issue` | Versioned team work item with an immutable key |
 | Business | `issue_labels` | `IssueLabel` | Many-to-many issue label assignment |
 | Business | `issue_comments` | `IssueComment` | Authored issue discussion with soft-delete timestamps |
@@ -222,7 +264,7 @@ The following modules introduce `PROPOSED` entities and APIs. References to Busi
 | --- | --- |
 | [01 — Identity and profile](01-identity-profile.md) | User and notification preferences |
 | [02 — Workspace and team](02-workspace-team.md) | Workspaces, teams, memberships, and invitations |
-| [03 — Work planning](03-work-planning.md) | Projects, cycles, issues, comments, events, labels, milestones, and updates |
+| [03 — Work planning](03-work-planning.md) | Implemented planning core; sub-issues and production pagination remain proposed |
 | [04 — Views and notifications](04-views-notifications.md) | Saved views, inbox notifications, and aggregate read models |
 | [05 — GitHub webhook](05-github-webhook.md) | Pull-request snapshots, issue links, and webhook delivery deduplication |
 | [06 — Administration](06-administration.md) | Workspace settings, allowed domains, and audit events |
