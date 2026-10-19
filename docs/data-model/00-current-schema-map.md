@@ -370,7 +370,9 @@ The `(auth_issuer, auth_subject)` badges denote the partial composite unique ind
 | Business | `file_assets` | `FileAsset` | Private object metadata, lifecycle state, and workspace scope |
 | Business | `issue_attachments` | `IssueAttachment` | Foreign-key-safe link from one file asset to an issue |
 | Business | `project_attachments` | `ProjectAttachment` | Foreign-key-safe link from one file asset to a project |
-| Business | `outbox_events` | `OutboxEvent` | Durable lifecycle work queue with lease, retry, error, and publication state |
+| Business | `outbox_events` | `OutboxEvent` | Append-only transaction bridge captured from PostgreSQL WAL by Debezium |
+| Business | `knowledge_sources` | `KnowledgeSource` | Current indexed identity, source/model versions, content hash, scope and status |
+| Business | `knowledge_chunks` | `KnowledgeChunk` | ACL-scoped database-source text, metadata and `vector(1024)` embeddings |
 | Business | `document_ingestions` | `DocumentIngestion` | Versioned per-file parser/chunker/embedding lifecycle, retry state, and tombstone |
 | Business | `document_pages` | `DocumentPage` | Parsed parent-page Markdown/plain text and heading provenance |
 | Business | `document_chunks` | `DocumentChunk` | ACL-scoped canonical chunk text, provenance, metadata, and `vector(1024)` embedding |

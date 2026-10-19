@@ -4,9 +4,10 @@
 
 This is the code-backed current-state architecture after the KEY-11 ingestion foundation. It is
 intentionally different from the target design: CommonPlan now has local/S3-compatible attachment
-storage, an outbox-driven ingestion worker, Docling parsing, a private LiteLLM Gateway backed by
-Qwen/TEI, and canonical pgvector rows. It still has no online retrieval/answer service, general event
-bus, reranker, citation assembler, generation model, or registered MCP tool. An optional empty
+storage, a transactional outbox captured from PostgreSQL WAL by Debezium, a Kafka-compatible
+Redpanda event backbone, database and document knowledge ingestion, Docling parsing, a private
+LiteLLM Gateway backed by Qwen/TEI, and canonical pgvector rows. It still has no online
+retrieval/answer service, reranker, citation assembler, generation model, or registered MCP tool. An optional empty
 LiteLLM MCP gateway profile now makes the future tool boundary independently deployable without
 claiming any tool integration is complete.
 
@@ -17,7 +18,9 @@ claiming any tool integration is complete.
 | React Web App | Browser UI from the separate web repository. Local development uses Vite on `localhost:5173`; production serves the static build through hosting/CDN. Keeps the short-lived access token in memory and receives an opaque HttpOnly BFF session cookie. |
 | Business API + Web BFF | One FastAPI deployable on port 8000. Owns `/auth/*` browser mediation, all protected product APIs, resource authorization, and the GitHub webhook. |
 | Auth Service | Independent FastAPI deployable on port 8001. Owns credentials, Google identity linking, access-token signing, JWKS, refresh rotation, and login throttling. |
-| Ingestion Worker | Separate worker image/process. Claims attachment outbox events with leases and retries, reads source objects, runs Docling and HybridChunker, calls the embedding runtime, and persists pages/chunks. |
+| Debezium CDC | Independent Kafka Connect process. Reads committed inserts from the append-only outbox through PostgreSQL `pgoutput`; it never queries product tables. |
+| Redpanda | Kafka-compatible durable event broker. Owns topics, consumer-group offsets, replay and the dead-letter stream. Local development uses one node; production can use any Kafka-compatible managed provider. |
+| Ingestion Worker | Separate Kafka consumer process. Loads authoritative attachments, Issues, Comments, Projects and Project Updates through repositories; renders/parses, chunks, embeds and persists idempotently. |
 | LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates the worker and maps `commonplan-embedding-v1` to the pinned physical embedding profile. |
 | LiteLLM MCP Tool Gateway | Optional Compose profile on port 4001. Separate config and credential; currently an empty registry with no upstream MCP server or application consumer. |
 | Qwen/TEI embedding runtime | Private local model service. Serves the pinned `Qwen/Qwen3-Embedding-0.6B` revision and returns normalized 1,024-dimensional vectors. |
@@ -28,7 +31,8 @@ claiming any tool integration is complete.
 
 | Store | Authority |
 | --- | --- |
-| Business PostgreSQL (`zhitong`) | Product entities, local profile projection, browser auth-session vault, application sessions, GitHub PR/webhook records, durable outbox events, ingestion state, pages, chunks, and canonical `vector(1024)` embeddings. |
+| Business PostgreSQL (`zhitong`) | Product entities, local profile projection, browser auth-session vault, application sessions, GitHub records, append-only outbox, file ingestion artifacts, knowledge sources/chunks, and canonical `vector(1024)` embeddings. |
+| Redpanda log | Durable knowledge events, consumer offsets and DLQ records. It is transport/replay state, not the source of truth for product content. |
 | Auth PostgreSQL (`zhitong_auth`) | Identity users, password hashes, external identities, refresh-token hash families, login codes, and login attempts. |
 | Redis | Disposable read-through cache for application sessions. PostgreSQL remains the source of truth. |
 | RSA key volume | Auth Service signing key material. The private key never crosses the identity boundary. |
@@ -49,10 +53,14 @@ Compose uses one physical PostgreSQL server with two databases and independent A
 5. Resource policies then enforce workspace membership, Team membership/role, and resource ownership.
 6. Services and optional operators call repository protocols. Only repository implementations access
    SQLAlchemy or PostgreSQL; architecture tests enforce this boundary.
-7. Completing an upload writes `file_assets` and a `file.ready` outbox event atomically. The ingestion
-   worker later claims that event, reads the authorized source object, parses/chunks it, calls the
-   authenticated gateway alias, and writes ACL-scoped page and chunk rows. Upload success never waits
-   for model availability.
+7. Every indexable mutation writes product state and a `knowledge.source.*` outbox row in the same
+   transaction. The service-facing `EventPublisher` persists only to that outbox; it never calls Kafka.
+8. Debezium tails PostgreSQL WAL and routes committed outbox inserts to
+   `commonplan.knowledge.v1` in Redpanda. The worker consumes with a durable consumer group.
+9. Attachment events take the Docling path. Issue, Comment, Project and Project Update events use a
+   deterministic Markdown renderer. Both paths chunk and embed through the same model alias. The
+   worker commits the Kafka offset only after its repository transaction succeeds; exhausted events
+   go to `commonplan.knowledge.dlq.v1`.
 
 LiteLLM and TEI are deliberately separate deployables. LiteLLM authenticates and routes the stable
 alias; TEI loads the pinned Qwen weights and performs inference. Vectors return to the worker, and the
@@ -66,9 +74,9 @@ worker's repository—not either model component—writes pgvector rows.
   at workspace scope without project-to-repository mapping. `smee` is a local-development transport,
   not a production component.
 
-## Implemented ingestion boundary and remaining RAG seam
+## Implemented knowledge-ingestion boundary and remaining RAG seam
 
-The offline ingestion foundation is implemented, but it deliberately stops before search. There is no
+The offline ingestion foundation includes attachments and high-context database records, but it deliberately stops before search. There is no
 vector/lexical search endpoint, query embedding path, ACL-filtered candidate retrieval, reranker,
 citation assembler, or answer-generation model. LiteLLM is implemented locally for the embedding
 path; production gateway PostgreSQL/virtual keys, budgets, and multi-replica governance remain a

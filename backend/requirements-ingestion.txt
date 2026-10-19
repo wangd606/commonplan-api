@@ -1,2 +1,3 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 docling==2.135.0
+confluent-kafka==2.12.2

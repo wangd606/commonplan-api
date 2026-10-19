@@ -23,8 +23,8 @@ erDiagram
 2. Business API checks Team/resource access, validates type and size, creates a `pending` `file_assets` row and its resource link, and returns a 15-minute signed `PUT` URL.
 3. Browser uploads the bytes to the configured storage driver using the returned headers. The local driver exposes only HMAC-signed temporary routes; the S3 driver uses native presigned URLs.
 4. Client calls `/files/{fileId}/complete`; the API checks authorization again and verifies the stored object size before marking it `ready`.
-5. The same transaction writes a `file.ready` outbox event. A later indexing worker can consume this event without putting extraction or embedding work on the upload request path.
-6. Downloads require a new authorized request and return a short-lived signed URL. Deletion removes the object, soft-deletes metadata, and writes `file.deleted`.
+5. The same transaction appends a `knowledge.source.upserted` event for the attachment. Debezium publishes it from PostgreSQL WAL to the knowledge topic, so extraction and embedding never run on the upload request path.
+6. Downloads require a new authorized request and return a short-lived signed URL. Deletion removes the object, soft-deletes metadata, and appends `knowledge.source.deleted`.
 
 ### Lost upload acknowledgements
 
@@ -32,7 +32,7 @@ A successful storage `PUT` and its HTTP acknowledgement are separate facts: stor
 
 1. After every `PUT` attempt, including an ambiguous failure, the client calls the idempotent `/complete` endpoint.
 2. If storage already contains an object of the declared size, `/complete` marks the existing asset `ready` and the upload succeeds.
-3. Transient completion failures are retried against the same `fileId`; completing an already-ready asset returns that asset without emitting another `file.ready` event.
+3. Transient completion failures are retried against the same `fileId`; completing an already-ready asset returns that asset without appending a duplicate knowledge event.
 4. Only when completion confirms that the object is absent does the client retry `PUT` with the same signed URL and storage key. It does not call `/initiate` again, so this recovery path cannot create a duplicate metadata row.
 
 This handles both a lost `PUT` response and a lost `/complete` response. Long-abandoned `pending` uploads still require the planned cleanup worker.

@@ -566,14 +566,75 @@ class OutboxEvent(Base):
     aggregate_id: Mapped[str] = mapped_column(String(36), index=True)
     event_type: Mapped[str] = mapped_column(String(120), index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
-    attempts: Mapped[int] = mapped_column(default=0)
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    locked_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_version: Mapped[int] = mapped_column(default=1)
+    partition_key: Mapped[str] = mapped_column(String(200), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+    __table_args__ = (UniqueConstraint("source_type", "source_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    team_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("teams.id", ondelete="CASCADE"), index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(40), index=True)
+    source_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    issue_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("issues.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    source_version: Mapped[int] = mapped_column(BigInteger, default=1)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    renderer_version: Mapped[str] = mapped_column(String(40))
+    chunker_version: Mapped[str] = mapped_column(String(40))
+    embedding_provider: Mapped[str] = mapped_column(String(40))
+    embedding_model: Mapped[str] = mapped_column(String(160))
+    embedding_dimensions: Mapped[int] = mapped_column()
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (UniqueConstraint("knowledge_source_id", "chunk_index"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    knowledge_source_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    team_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("teams.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    issue_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("issues.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    chunk_index: Mapped[int] = mapped_column()
+    content: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    token_count: Mapped[int] = mapped_column()
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(1024), nullable=False)
+    chunk_metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class DocumentIngestion(Base):

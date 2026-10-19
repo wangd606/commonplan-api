@@ -3,6 +3,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import Depends
+from app.events import DomainEvent, EventPublisher, EventPublisherDep
 from app.models import Project, ProjectMilestone, ProjectObjective, ProjectUpdate, User
 from app.repositories.errors import RepositoryConflictError
 from app.repositories.project_repository import ProjectRepository, ProjectRepositoryDep
@@ -22,9 +23,13 @@ HEALTH_VALUES = {"on_track", "at_risk", "off_track"}
 
 
 class ProjectService:
-    def __init__(self, repository: ProjectRepository, workspaces: WorkspaceService):
+    def __init__(
+        self, repository: ProjectRepository, workspaces: WorkspaceService,
+        events: EventPublisher | None = None,
+    ):
         self.repository = repository
         self.workspaces = workspaces
+        self.events = events
 
     def list_projects(self, user: User, workspace_id: str, team_id: str):
         self._access(user, workspace_id, team_id)
@@ -42,6 +47,7 @@ class ProjectService:
             target_date=values.get("target_date"),
         )
         self.repository.add(project)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(project)
         return self.snapshot(project)
@@ -56,6 +62,7 @@ class ProjectService:
         self._validate_project(team_id, changes)
         for field, value in changes.items():
             setattr(project, field, value.strip() if field == "name" and isinstance(value, str) else value)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(project)
         return self.snapshot(project)
@@ -70,6 +77,7 @@ class ProjectService:
             body=values["body"].strip(), position=values.get("position", 0), is_met=False,
         )
         self.repository.add(objective)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(objective)
         return objective
@@ -82,6 +90,8 @@ class ProjectService:
             raise ProjectNotFound
         for field, value in changes.items():
             setattr(objective, field, value.strip() if field == "body" and isinstance(value, str) else value)
+        project = self._project(project_id, team_id)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(objective)
         return objective
@@ -96,6 +106,7 @@ class ProjectService:
             target_date=values.get("target_date"), position=values.get("position", 0),
         )
         self.repository.add(milestone)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(milestone)
         return self.milestone_snapshot(milestone)
@@ -109,6 +120,8 @@ class ProjectService:
         self._validate_milestone(changes)
         for field, value in changes.items():
             setattr(milestone, field, value.strip() if field == "name" and isinstance(value, str) else value)
+        project = self._project(project_id, team_id)
+        self._project_event(workspace_id, project)
         self._commit()
         self.repository.refresh(milestone)
         return self.milestone_snapshot(milestone)
@@ -123,6 +136,13 @@ class ProjectService:
             body=body.strip(), health=health,
         )
         self.repository.add(update)
+        if self.events is not None:
+            self.events.publish(DomainEvent(
+                workspace_id=workspace_id,
+                source_type="project_update",
+                source_id=update.id,
+                metadata={"project_id": project.id, "team_id": project.team_id},
+            ))
         self._commit()
         self.repository.refresh(update)
         return self.update_snapshot(update)
@@ -197,9 +217,22 @@ class ProjectService:
         except RepositoryConflictError as exc:
             raise ProjectConflict("Project value already exists") from exc
 
+    def _project_event(self, workspace_id: str, project: Project) -> None:
+        if self.events is not None:
+            self.events.publish(DomainEvent(
+                workspace_id=workspace_id,
+                source_type="project",
+                source_id=project.id,
+                metadata={"project_id": project.id, "team_id": project.team_id},
+            ))
 
-def get_project_service(repository: ProjectRepositoryDep, workspaces: WorkspaceServiceDep) -> ProjectService:
-    return ProjectService(repository, workspaces)
+
+def get_project_service(
+    repository: ProjectRepositoryDep,
+    workspaces: WorkspaceServiceDep,
+    events: EventPublisherDep,
+) -> ProjectService:
+    return ProjectService(repository, workspaces, events)
 
 
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

@@ -5,7 +5,7 @@ from app.ingestion.chunking import CHUNKER_VERSION, chunk_document
 from app.ingestion.embeddings import EmbeddingProvider
 from app.ingestion.parsers import ParserRegistry, UnsupportedDocumentType
 from app.infrastructure.object_storage import ObjectStorage
-from app.models import OutboxEvent
+from app.ingestion.knowledge_types import KnowledgeEvent
 from app.repositories.ingestion_repository import IngestionRepository
 
 
@@ -29,23 +29,20 @@ class IngestionService:
         self.parsers = parsers
         self.embeddings = embeddings
 
-    def process(self, event: OutboxEvent) -> None:
-        file_id = str(event.payload.get("file_id") or event.aggregate_id)
-        if event.event_type == "file.deleted":
+    def process(self, event: KnowledgeEvent) -> None:
+        file_id = event.source_id
+        if event.operation == "delete":
             self.repository.delete_ingestion(file_id)
-            self.repository.publish(event.id)
             return
-        if event.event_type != "file.ready":
+        if event.source_type != "attachment":
             raise IngestionError(
-                "unsupported_event", f"Unsupported event {event.event_type}", retryable=False
+                "unsupported_event", f"Unsupported source {event.source_type}", retryable=False
             )
         file = self.repository.file(file_id)
         if file is None:
-            self.repository.publish(event.id)
             return
         if file.deleted_at is not None or file.upload_status == "deleted":
             self.repository.delete_ingestion(file_id)
-            self.repository.publish(event.id)
             return
         if file.upload_status != "ready":
             raise IngestionError("file_not_ready", "File upload is not ready")
@@ -74,7 +71,6 @@ class IngestionService:
             embedding_model=self.embeddings.model,
             embedding_dimensions=self.embeddings.dimensions,
         ):
-            self.repository.publish(event.id)
             return
         ingestion = self.repository.begin(
             file,
@@ -97,4 +93,3 @@ class IngestionService:
             raise IngestionError("unreadable_document", str(exc), retryable=False) from exc
         vectors = self.embeddings.embed([chunk.content for chunk in chunks])
         self.repository.complete_ingestion(ingestion.id, scope, document, chunks, vectors)
-        self.repository.publish(event.id)

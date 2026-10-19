@@ -8,7 +8,7 @@ retrieval or answer-generation behavior.
 ## 1. Start the ingestion stack
 
 ```bash
-docker compose up --build db redis auth-service embedding-service model-gateway backend ingestion-worker
+docker compose up --build db redis redpanda debezium auth-service embedding-service model-gateway backend ingestion-worker
 ```
 
 The database image includes pgvector. Alembic enables the extension and changes
@@ -27,6 +27,16 @@ Both local model endpoints are bound to `127.0.0.1` only. The worker calls LiteL
 `INGESTION_EMBEDDING_BATCH_SIZE`, `TEI_MAX_BATCH_TOKENS`, `TEI_MAX_CONCURRENT_REQUESTS`, and
 `TEI_TOKENIZATION_WORKERS` for a GPU deployment.
 
+Verify the event backbone before producing data:
+
+```bash
+curl --fail http://localhost:8083/connectors/commonplan-outbox/status
+docker compose exec -T redpanda rpk topic list
+```
+
+The connector must be `RUNNING`, and `commonplan.knowledge.v1` should exist after the first outbox
+insert. Port `19092` is the local Kafka endpoint; application containers use `redpanda:9092`.
+
 Apple Silicon uses the default ARM64 image. On x86_64 set:
 
 ```bash
@@ -37,8 +47,12 @@ TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-1.9 docker compose u
 
 Open the web application, enter an Issue or Project detail page, and upload a
 small Markdown, text, PDF, CSV, JSON, DOCX, XLSX, PPTX, or image file. Upload completion writes the ready
-file and its `file.ready` outbox event in one transaction. The worker handles
+file and its `knowledge.source.upserted` outbox event in one transaction. The worker handles
 parsing and embeddings asynchronously.
+
+Creating or editing an Issue, Project or Comment follows the same broker path without Docling. The
+worker loads the authoritative record through `KnowledgeRepository`, renders canonical Markdown and
+writes `knowledge_sources` plus `knowledge_chunks`.
 
 The authenticated status endpoint is:
 
@@ -67,7 +81,22 @@ For a successful upload, verify:
 - structured formats report `parser_name = 'docling'` and `chunk_metadata.strategy = 'docling_hybrid'`;
 - `workspace_id`, `team_id`, and exactly one resource ID are present;
 - the acceptance-invariant query returns zero rows;
-- no corresponding outbox event remains pending or failed.
+- the Redpanda consumer group has no unexplained lag and the DLQ is empty.
+
+Inspect database-source embeddings:
+
+```sql
+SELECT source_type, source_id, status, source_version, renderer_version,
+       embedding_model, indexed_at
+FROM knowledge_sources
+ORDER BY indexed_at DESC;
+
+SELECT source.source_type, source.source_id, chunk.chunk_index,
+       left(chunk.content, 160), vector_dims(chunk.embedding)
+FROM knowledge_chunks AS chunk
+JOIN knowledge_sources AS source ON source.id = chunk.knowledge_source_id
+ORDER BY source.indexed_at DESC, chunk.chunk_index;
+```
 
 To inspect one file, copy its `file_id` from the first result and add
 `WHERE i.file_asset_id = '<file-id>'` to the second query. The third query shows
@@ -80,10 +109,10 @@ Upload a legacy binary `.doc` file to confirm that the ingestion becomes
 `failed` while the original attachment remains downloadable. Its error code and
 message should appear in both the status endpoint and inspection query.
 
-After fixing a transient worker/configuration problem, set the failed event back
-to `pending` only in a disposable local database, or upload the file again. The
-worker's lease, attempt count, and exponential backoff are visible in
-`outbox_events`; process restart must not lose the job.
+After fixing a transient worker/configuration problem, replay the DLQ record to
+`commonplan.knowledge.v1`, or edit/upload the source again to create a newer event. Consumer offsets
+and lag are visible with `rpk group describe commonplan-knowledge-indexer-v1`; outbox rows are
+append-only and are never manually changed back to `pending`.
 
 ## 5. Verify the gateway alias
 

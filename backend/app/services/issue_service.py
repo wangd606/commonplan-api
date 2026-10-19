@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import Depends
+from app.events import DomainEvent, EventPublisher, EventPublisherDep
 from app.models import Cycle, Issue, IssueComment, IssueEvent, Label, Project, TeamCycleSettings, User
 from app.repositories.errors import RepositoryConflictError
 from app.repositories.issue_repository import IssueRepository, IssueRepositoryDep
@@ -17,9 +18,13 @@ class IssueValidationError(Exception): pass
 
 
 class IssueService:
-    def __init__(self, repository: IssueRepository, workspaces: WorkspaceService):
+    def __init__(
+        self, repository: IssueRepository, workspaces: WorkspaceService,
+        events: EventPublisher | None = None,
+    ):
         self.repository = repository
         self.workspaces = workspaces
+        self.events = events
 
     def states(self, user: User, workspace_id: str, team_id: str):
         self._access(user, workspace_id, team_id)
@@ -129,6 +134,7 @@ class IssueService:
             "issue.created",
             {"key": issue.key, "title": issue.title},
         )
+        self._knowledge_event(issue)
         self._commit()
         self.repository.refresh(issue)
         return issue, self.repository.issue_labels(issue.id)
@@ -183,6 +189,7 @@ class IssueService:
         issue.version += 1
         if event_changes:
             self._event(issue, user, "issue.updated", {"fields": event_changes})
+            self._knowledge_event(issue)
         self._commit()
         self.repository.refresh(issue)
         return issue, self.repository.issue_labels(issue.id)
@@ -208,6 +215,12 @@ class IssueService:
             "comment.created",
             {"comment_id": comment.id},
         )
+        self._publish(DomainEvent(
+            workspace_id=issue.workspace_id,
+            source_type="issue_comment",
+            source_id=comment.id,
+            metadata={"issue_id": issue.id, "team_id": issue.team_id},
+        ))
         self._commit()
         self.repository.refresh(comment)
         return self._comment_activity(comment)
@@ -356,6 +369,7 @@ class IssueService:
                     issue.cycle_id = next_cycle.id
                     issue.version += 1
                     self._event(issue, None, "issue.updated", {"fields": {"cycle_id": {"from": previous_cycle_id, "to": next_cycle.id}}, "automation": "cycle_rollover"})
+                    self._knowledge_event(issue)
             cycle.completed_at = now
             rollover_changed = True
         if rollover_changed:
@@ -369,6 +383,19 @@ class IssueService:
             event_type=event_type,
             changes={"schema_version": 1, **changes},
         ))
+
+    def _knowledge_event(self, issue: Issue) -> None:
+        self._publish(DomainEvent(
+            workspace_id=issue.workspace_id,
+            source_type="issue",
+            source_id=issue.id,
+            source_version=issue.version,
+            metadata={"issue_id": issue.id, "team_id": issue.team_id},
+        ))
+
+    def _publish(self, event: DomainEvent) -> None:
+        if self.events is not None:
+            self.events.publish(event)
 
     def _comment_activity(self, comment: IssueComment):
         author = self.repository.user(comment.author_user_id)
@@ -409,8 +436,12 @@ class IssueService:
             raise IssueConflict("Issue planning value already exists") from exc
 
 
-def get_issue_service(repository: IssueRepositoryDep, workspaces: WorkspaceServiceDep) -> IssueService:
-    return IssueService(repository, workspaces)
+def get_issue_service(
+    repository: IssueRepositoryDep,
+    workspaces: WorkspaceServiceDep,
+    events: EventPublisherDep,
+) -> IssueService:
+    return IssueService(repository, workspaces, events)
 
 
 IssueServiceDep = Annotated[IssueService, Depends(get_issue_service)]

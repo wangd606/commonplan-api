@@ -5,10 +5,11 @@ import re
 import uuid
 
 from fastapi import Depends
+from app.events import DomainEvent, EventPublisher, EventPublisherDep
 
 from app.config import settings
 from app.infrastructure.object_storage import ObjectStorage, ObjectStorageDep
-from app.models import FileAsset, IssueAttachment, OutboxEvent, ProjectAttachment, User
+from app.models import FileAsset, IssueAttachment, ProjectAttachment, User
 from app.repositories.attachment_repository import AttachmentRepository, AttachmentRepositoryDep
 from app.repositories.errors import RepositoryConflictError
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
@@ -44,10 +45,12 @@ class AttachmentService:
         repository: AttachmentRepository,
         workspaces: WorkspaceService,
         storage: ObjectStorage,
+        events: EventPublisher | None = None,
     ):
         self.repository = repository
         self.workspaces = workspaces
         self.storage = storage
+        self.events = events
 
     def list_issue(self, user: User, workspace_id: str, key: str) -> list[FileAsset]:
         issue = self._issue(user, workspace_id, key)
@@ -105,7 +108,7 @@ class AttachmentService:
             raise AttachmentConflict("Uploaded file size does not match the initiated upload")
         asset.upload_status = "ready"
         asset.ready_at = datetime.now(timezone.utc)
-        self.repository.add(self._event(asset, "file.ready"))
+        self._event(asset, "upsert")
         self._commit()
         self.repository.refresh(asset)
         return asset
@@ -149,7 +152,7 @@ class AttachmentService:
             raise AttachmentStorageError("Object storage is unavailable") from exc
         asset.upload_status = "deleted"
         asset.deleted_at = datetime.now(timezone.utc)
-        self.repository.add(self._event(asset, "file.deleted"))
+        self._event(asset, "delete")
         self._commit()
 
     def _issue(self, user: User, workspace_id: str, key: str):
@@ -214,16 +217,19 @@ class AttachmentService:
             scan_status="not_configured",
         )
 
-    @staticmethod
-    def _event(asset: FileAsset, event_type: str) -> OutboxEvent:
-        return OutboxEvent(
-            id=str(uuid.uuid4()), workspace_id=asset.workspace_id,
-            aggregate_type="file_asset", aggregate_id=asset.id, event_type=event_type,
-            payload={
-                "file_id": asset.id, "storage_key": asset.storage_key,
-                "content_type": asset.content_type, "byte_size": asset.byte_size,
-            },
-        )
+    def _event(self, asset: FileAsset, operation: str) -> None:
+        if self.events is not None:
+            self.events.publish(DomainEvent(
+                workspace_id=asset.workspace_id,
+                source_type="attachment",
+                source_id=asset.id,
+                operation=operation,
+                metadata={
+                    "file_id": asset.id,
+                    "content_type": asset.content_type,
+                    "byte_size": asset.byte_size,
+                },
+            ))
 
     def _commit(self) -> None:
         try:
@@ -236,8 +242,9 @@ def get_attachment_service(
     repository: AttachmentRepositoryDep,
     workspaces: WorkspaceServiceDep,
     storage: ObjectStorageDep,
+    events: EventPublisherDep,
 ) -> AttachmentService:
-    return AttachmentService(repository, workspaces, storage)
+    return AttachmentService(repository, workspaces, storage, events)
 
 
 AttachmentServiceDep = Annotated[AttachmentService, Depends(get_attachment_service)]

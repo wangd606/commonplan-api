@@ -1,6 +1,14 @@
 services:
   db:
     image: pgvector/pgvector:0.8.7-pg16
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-zhitong}
       POSTGRES_USER: ${POSTGRES_USER:-zhitong}
@@ -171,9 +179,16 @@ services:
       OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-commonplan}
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-commonplan-local-secret}
       INGESTION_WORKER_ID: ${INGESTION_WORKER_ID:-ingestion-worker-1}
-      INGESTION_POLL_SECONDS: ${INGESTION_POLL_SECONDS:-1}
-      INGESTION_LEASE_SECONDS: ${INGESTION_LEASE_SECONDS:-600}
       INGESTION_MAX_ATTEMPTS: ${INGESTION_MAX_ATTEMPTS:-5}
+      EVENT_BUS_BOOTSTRAP_SERVERS: ${EVENT_BUS_BOOTSTRAP_SERVERS:-redpanda:9092}
+      EVENT_BUS_TOPIC: ${EVENT_BUS_TOPIC:-commonplan.knowledge.v1}
+      EVENT_BUS_DLQ_TOPIC: ${EVENT_BUS_DLQ_TOPIC:-commonplan.knowledge.dlq.v1}
+      EVENT_BUS_CONSUMER_GROUP: ${EVENT_BUS_CONSUMER_GROUP:-commonplan-knowledge-indexer-v1}
+      EVENT_BUS_MAX_POLL_INTERVAL_SECONDS: ${EVENT_BUS_MAX_POLL_INTERVAL_SECONDS:-1800}
+      EVENT_BUS_SECURITY_PROTOCOL: ${EVENT_BUS_SECURITY_PROTOCOL:-PLAINTEXT}
+      EVENT_BUS_SASL_MECHANISM: ${EVENT_BUS_SASL_MECHANISM:-SCRAM-SHA-256}
+      EVENT_BUS_SASL_USERNAME: ${EVENT_BUS_SASL_USERNAME:-}
+      EVENT_BUS_SASL_PASSWORD: ${EVENT_BUS_SASL_PASSWORD:-}
       INGESTION_ALLOW_UNSCANNED: ${INGESTION_ALLOW_UNSCANNED:-true}
       INGESTION_CHUNK_TOKENS: ${INGESTION_CHUNK_TOKENS:-300}
       INGESTION_CHUNK_OVERLAP_TOKENS: ${INGESTION_CHUNK_OVERLAP_TOKENS:-50}
@@ -199,6 +214,81 @@ services:
       backend-migrate:
         condition: service_completed_successfully
       model-gateway:
+        condition: service_healthy
+      debezium-init:
+        condition: service_completed_successfully
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v25.2.9
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 768M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "127.0.0.1:19092:19092"
+      - "127.0.0.1:19644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  debezium:
+    image: quay.io/debezium/connect:3.6
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: commonplan-debezium
+      CONFIG_STORAGE_TOPIC: commonplan.connect.configs
+      OFFSET_STORAGE_TOPIC: commonplan.connect.offsets
+      STATUS_STORAGE_TOPIC: commonplan.connect.status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8083/connectors >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  debezium-init:
+    image: curlimages/curl:8.16.0
+    volumes:
+      - ./deploy/debezium/outbox-connector.json:/config/outbox-connector.json:ro
+    command:
+      - sh
+      - -ec
+      - |
+        until curl --silent --fail http://debezium:8083/connectors; do sleep 2; done
+        curl --silent --fail --show-error \
+          -X PUT -H 'Content-Type: application/json' \
+          --data @/config/outbox-connector.json \
+          http://debezium:8083/connectors/commonplan-outbox/config
+    depends_on:
+      debezium:
         condition: service_healthy
 
   model-gateway:
@@ -277,3 +367,4 @@ volumes:
   attachment_data:
   docling_cache:
   embedding_model_cache:
+  redpanda_data:

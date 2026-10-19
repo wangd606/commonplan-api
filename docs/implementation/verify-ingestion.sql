@@ -77,15 +77,13 @@ HAVING count(DISTINCT p.id) = 0
     OR count(DISTINCT c.id) = 0
     OR count(c.embedding) <> count(DISTINCT c.id);
 
--- 5. Events that still need attention.
+-- 5. Recent append-only knowledge events (delivery state lives in Redpanda).
 SELECT
     id,
-    aggregate_id AS file_id,
-    status,
-    attempts,
-    available_at,
-    last_error
+    aggregate_type AS source_type,
+    aggregate_id AS source_id,
+    event_type,
+    partition_key,
+    created_at
 FROM outbox_events
-WHERE event_type IN ('file.ready', 'file.deleted')
-  AND status <> 'published'
 ORDER BY created_at DESC;

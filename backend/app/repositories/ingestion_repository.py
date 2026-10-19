@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 import uuid
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.ingestion.chunking import count_tokens
@@ -14,7 +14,6 @@ from app.models import (
     FileAsset,
     Issue,
     IssueAttachment,
-    OutboxEvent,
     Project,
     ProjectAttachment,
     Team,
@@ -26,41 +25,6 @@ class IngestionRepository:
 
     def __init__(self, db: Session) -> None:
         self.db = db
-
-    def claim_next(self, worker_id: str, lease_seconds: int) -> OutboxEvent | None:
-        now = datetime.now(timezone.utc)
-        expired = now - timedelta(seconds=lease_seconds)
-        self.db.execute(
-            update(OutboxEvent)
-            .where(
-                OutboxEvent.status == "processing",
-                OutboxEvent.event_type.in_(("file.ready", "file.deleted")),
-                or_(OutboxEvent.locked_at.is_(None), OutboxEvent.locked_at < expired),
-            )
-            .values(status="pending", locked_at=None, locked_by=None)
-        )
-        event = self.db.scalar(
-            select(OutboxEvent)
-            .where(
-                OutboxEvent.status == "pending",
-                OutboxEvent.available_at <= now,
-                OutboxEvent.event_type.in_(("file.ready", "file.deleted")),
-            )
-            .order_by(OutboxEvent.created_at, OutboxEvent.id)
-            .with_for_update(skip_locked=True)
-            .limit(1)
-        )
-        if event is None:
-            self.db.commit()
-            return None
-        event.status = "processing"
-        event.attempts += 1
-        event.locked_at = now
-        event.locked_by = worker_id
-        event.last_error = None
-        self.db.commit()
-        self.db.refresh(event)
-        return event
 
     def file(self, file_id: str) -> FileAsset | None:
         return self.db.get(FileAsset, file_id)
@@ -217,32 +181,6 @@ class IngestionRepository:
             ingestion.error_message = message[:4000]
             ingestion.completed_at = datetime.now(timezone.utc)
             self.db.commit()
-
-    def publish(self, event_id: str) -> None:
-        event = self.db.get(OutboxEvent, event_id)
-        if event is None:
-            return
-        event.status = "published"
-        event.published_at = datetime.now(timezone.utc)
-        event.locked_at = None
-        event.locked_by = None
-        event.last_error = None
-        self.db.commit()
-
-    def retry_or_fail(self, event_id: str, error: str, max_attempts: int) -> None:
-        event = self.db.get(OutboxEvent, event_id)
-        if event is None:
-            return
-        event.last_error = error[:4000]
-        event.locked_at = None
-        event.locked_by = None
-        if event.attempts >= max_attempts:
-            event.status = "failed"
-        else:
-            event.status = "pending"
-            delay = min(300, 2 ** max(0, event.attempts - 1))
-            event.available_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-        self.db.commit()
 
     def counts(self, ingestion_id: str) -> tuple[int, int]:
         pages = len(list(self.db.scalars(

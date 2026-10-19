@@ -181,11 +181,11 @@
       <div class="pipeline">
         <div class="pipeline-label">Ingestion<span>offline + retryable</span></div>
         <div class="flow ingest-flow">
-          <article class="card node core-source ingest-source"><span class="badge existing">Existing source</span><h2>Business API</h2><p>Commits attachment metadata and durable indexing work.</p></article>
-          <div class="flow-arrow dashed"><span>durable job</span></div>
-          <article class="card node queue ingest-queue"><span class="badge planned">Current: PG outbox</span><h2>Outbox / Future Queue</h2><p>Current leases and retries use PostgreSQL; a separate queue remains a measured evolution.</p></article>
-          <div class="flow-arrow dashed"><span>claim + consume</span></div>
-          <article class="card node ingest-worker"><span class="badge implemented">Implemented</span><h2>Ingestion Worker</h2><p>Read object · Docling parse · HybridChunker · call embedding alias · receive vectors · persist through repositories.</p></article>
+          <article class="card node core-source ingest-source"><span class="badge existing">Transactional source</span><h2>Business API</h2><p>Commits the product mutation and append-only knowledge event in one PostgreSQL transaction.</p></article>
+          <div class="flow-arrow dashed"><span>WAL / CDC</span></div>
+          <article class="card node queue ingest-queue"><span class="badge implemented">Implemented backbone</span><h2>Debezium + Redpanda</h2><p>Debezium captures outbox inserts; Kafka topics provide replay, consumer groups, retry ownership and DLQ.</p></article>
+          <div class="flow-arrow dashed"><span>consumer group</span></div>
+          <article class="card node ingest-worker"><span class="badge implemented">Implemented</span><h2>Knowledge Worker</h2><p>Docling for files · deterministic renderer for database records · chunk · embed · idempotent repository upsert.</p></article>
           <div class="flow-arrow dashed"><span>repository upsert</span></div>
           <article class="card node ingest-corpus"><span class="badge existing">Data boundary</span><h2>Retrieval Corpus</h2><p>Object storage + PostgreSQL FTS metadata + ACL-scoped pgvector chunks. This is owned state, not another microservice.</p></article>
         </div>

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends
+from app.events import DomainEvent, EventPublisher, EventPublisherDep
 
 from app.models import IssueComment, IssueEvent, IssueRelation, IssueRelationType, IssueWatcher, User
 from app.repositories.collaboration_repository import CollaborationRepository, CollaborationRepositoryDep
@@ -22,11 +23,13 @@ class CollaborationService:
         workspaces: WorkspaceService,
         issues: IssueService,
         notifications: ViewNotificationService | None = None,
+        events: EventPublisher | None = None,
     ):
         self.repository = repository
         self.workspaces = workspaces
         self.issues = issues
         self.notifications = notifications
+        self.events = events
         self.policy = ResourcePolicy(workspaces)
 
     def create_comment(self, user: User, workspace_id: str, key: str, body: str, mentioned_user_ids: list[int] | None = None):
@@ -50,6 +53,7 @@ class CollaborationService:
             self._ensure_watcher(issue.id, user_id, "mentioned")
         event_id = self._event(issue.id, user.id, "comment.created", {"comment_id": comment.id, "mentioned_user_ids": sorted(mentioned)})
         self._notify(issue, event_id, user.id, "comment", mentioned, {"issue_key": issue.key, "comment_id": comment.id})
+        self._comment_event(issue, comment)
         self.repository.save_changes()
         self.repository.refresh(comment)
         return self._comment_activity(comment)
@@ -71,6 +75,7 @@ class CollaborationService:
             self._ensure_watcher(issue.id, user_id, "mentioned")
         event_id = self._event(issue.id, user.id, "comment.updated", {"comment_id": comment.id, "mentioned_user_ids": sorted(mentioned)})
         self._notify(issue, event_id, user.id, "comment_updated", mentioned, {"issue_key": issue.key, "comment_id": comment.id})
+        self._comment_event(issue, comment)
         self.repository.save_changes()
         self.repository.refresh(comment)
         return self._comment_activity(comment)
@@ -84,6 +89,7 @@ class CollaborationService:
         comment.deleted_at = datetime.now(timezone.utc)
         self.repository.replace_mentions(comment.id, set())
         self._event(issue.id, user.id, "comment.deleted", {"comment_id": comment.id})
+        self._comment_event(issue, comment, operation="delete")
         self.repository.save_changes()
 
     def collaboration(self, user: User, workspace_id: str, key: str):
@@ -328,14 +334,25 @@ class CollaborationService:
             "created_at": comment.created_at, "edited_at": comment.edited_at,
         }
 
+    def _comment_event(self, issue, comment, *, operation="upsert"):
+        if self.events is not None:
+            self.events.publish(DomainEvent(
+                workspace_id=issue.workspace_id,
+                source_type="issue_comment",
+                source_id=comment.id,
+                operation=operation,
+                metadata={"issue_id": issue.id, "team_id": issue.team_id},
+            ))
+
 
 def get_collaboration_service(
     repository: CollaborationRepositoryDep,
     workspaces: WorkspaceServiceDep,
     issues: IssueServiceDep,
     notifications: ViewNotificationServiceDep,
+    events: EventPublisherDep,
 ) -> CollaborationService:
-    return CollaborationService(repository, workspaces, issues, notifications)
+    return CollaborationService(repository, workspaces, issues, notifications, events)
 
 
 CollaborationServiceDep = Annotated[CollaborationService, Depends(get_collaboration_service)]

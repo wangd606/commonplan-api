@@ -31,16 +31,23 @@ Business API remains one deployable modular monolith. Workspace, Team, issue, cy
 collaboration, view, inbox, and GitHub modules do not need separate services until scaling or ownership
 data proves that boundary is valuable.
 
-### 4. Add an async foundation only when RAG ingestion needs it
+### 4. Use a Kafka-compatible event backbone without coupling business services to Kafka
 
-The target needs durable background jobs for attachments, embeddings, retries, notifications, and
-scheduled work. The diagram distinguishes today's PostgreSQL outbox from a future queue. Kafka should
-not be selected merely because the reference design uses it; a managed queue or the existing leased
-outbox may be sufficient at initial load.
+CommonPlan uses a transactional outbox plus Debezium CDC so product mutations and events commit
+atomically. Debezium reads committed inserts from PostgreSQL WAL and publishes them to a
+Kafka-compatible broker. Local development uses a single-node Redpanda deployment; production can
+select Redpanda Cloud, Confluent, Aiven or MSK through connection configuration. Business services
+depend only on an `EventPublisher` whose current implementation appends to the caller's database
+transaction; they never hold broker clients or perform dual writes.
+
+The outbox is append-only. Delivery attempts and progress belong to broker consumer offsets, retry
+logic and a DLQ. At-least-once delivery is handled through source versions, content hashes and unique
+source/chunk identities.
 
 ### 5. Add RAG with explicit application, data, and model-runtime boundaries
 
-- **Ingestion & Background Workers**: consume durable index jobs; load original objects; parse,
+- **Ingestion & Background Workers**: consume durable Kafka index events; load original objects and
+  authoritative database records through repositories; parse or render,
   normalize, chunk, embed, version, and upsert full-text/vector indexes; retry idempotently.
 - **AI/RAG Service**: accept an already-authorized user/workspace/team context from Business API;
   rewrite and embed the query; enforce metadata ACL filters during hybrid full-text/vector search;
@@ -123,8 +130,9 @@ external MCP client requires its `/mcp` endpoint; that exposure must not also ex
    migrations as release jobs, health checks, backups, and OpenTelemetry.
 2. **BFF separation** — extract current auth/BFF modules, proxy all browser business calls, move the
    encrypted browser-session vault, and stop returning access tokens to JavaScript.
-3. **Async and attachment foundation** — object storage, job/event abstraction, idempotent workers,
-   retry/dead-letter behavior, and attachment status tracking.
+3. **Knowledge event and ingestion foundation** — transactional outbox, Debezium, Kafka-compatible
+   broker, object storage, database-entity renderers, idempotent workers, retry/DLQ behavior, and
+   attachment status tracking.
 4. **RAG platform** — full-text + vector indexing, ingestion workers, AI/RAG service, model gateway,
    MCP tool gateway, evaluation data, feedback, security filters, and cost/latency observability.
 
