@@ -218,7 +218,9 @@ def test_ready_event_is_ingested_idempotently_and_delete_tombstones(context, mon
 
 
 def test_database_record_ingestion_uses_canonical_nodes_and_profiles(context, monkeypatch):
-    db, _attachments, _storage, _owner, workspace, _team, issue, _project = context
+    db, _attachments, _storage, _owner, workspace, _team, issue, project = context
+    issue.project_id = project.id
+    db.commit()
     monkeypatch.setattr(settings, "ingestion_chunk_tokens", 300)
     monkeypatch.setattr(settings, "ingestion_chunk_overlap_tokens", 50)
     service = KnowledgeIngestionService(
@@ -242,6 +244,7 @@ def test_database_record_ingestion_uses_canonical_nodes_and_profiles(context, mo
     assert source.status == "ready"
     assert len(nodes) == 1
     assert nodes[0].node_key == "chunk:0"
+    assert nodes[0].issue_id == issue.id and nodes[0].project_id == project.id
     embedding = db.get(KnowledgeEmbedding, (nodes[0].id, source.active_embedding_profile_id))
     assert embedding is not None and len(embedding.embedding) == 12
 

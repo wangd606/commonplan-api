@@ -136,7 +136,8 @@ flowchart LR
 
 This path is asynchronous and retryable: upload availability does not depend on Docling or the model
 runtime. The worker is a separate process but still obeys the repository-only database boundary.
-Knowledge nodes denormalize workspace/team and exactly one issue/project scope so a future retrieval query can
+Knowledge nodes denormalize workspace/team and at least one issue/project scope. An Issue-derived node
+may also carry its parent Project, so a future retrieval query can
 apply authorization in the same database statement. The current implementation stops here—there is
 no HNSW/lexical index, similarity-search API, query embedder, reranker, citation assembler, or generation model yet. The
 gateway currently provides the embedding alias and authenticated routing only.

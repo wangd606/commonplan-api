@@ -78,7 +78,8 @@ For a successful upload, verify:
 - page and chunk counts are greater than zero;
 - every chunk reports `vector_dims = 1024` and `vector_norm` close to `1.0`;
 - structured formats report `parser_name = 'docling'` and `chunk_metadata.strategy = 'docling_hybrid'`;
-- `workspace_id`, `team_id`, and exactly one resource ID are present;
+- `workspace_id`, `team_id`, and at least one Issue/Project resource ID are present; Issue-derived
+  nodes may also carry their parent Project ID;
 - the acceptance-invariant query returns zero rows;
 - the Redpanda consumer group has no unexplained lag and the DLQ is empty.
 

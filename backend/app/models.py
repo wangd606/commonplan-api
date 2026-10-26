@@ -626,8 +626,7 @@ class KnowledgeNode(Base):
     __table_args__ = (
         UniqueConstraint("knowledge_source_id", "node_key"),
         CheckConstraint(
-            "(issue_id IS NOT NULL AND project_id IS NULL) OR "
-            "(issue_id IS NULL AND project_id IS NOT NULL)",
+            "issue_id IS NOT NULL OR project_id IS NOT NULL",
             name="ck_knowledge_node_scope",
         ),
     )

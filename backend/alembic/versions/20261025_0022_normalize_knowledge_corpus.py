@@ -145,8 +145,7 @@ def upgrade() -> None:
             created_at timestamptz NOT NULL DEFAULT now(),
             CONSTRAINT uq_knowledge_node_key UNIQUE (knowledge_source_id, node_key),
             CONSTRAINT ck_knowledge_node_scope CHECK (
-                (issue_id IS NOT NULL AND project_id IS NULL)
-                OR (issue_id IS NULL AND project_id IS NOT NULL)
+                issue_id IS NOT NULL OR project_id IS NOT NULL
             ),
             CONSTRAINT ck_knowledge_node_ordinal CHECK (ordinal >= 0),
             CONSTRAINT ck_knowledge_node_tokens CHECK (token_count >= 0),
