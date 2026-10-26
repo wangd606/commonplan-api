@@ -74,4 +74,4 @@ the staged implementation plan is in [`docs/implementation/milestones.md`](docs/
 The AI boundary and LiteLLM/Bifrost decision are documented separately in the
 [model-gateway decision](docs/architecture/model-gateway-decision.md). The local embedding path is
 implemented through LiteLLM; production virtual keys, gateway persistence, generation, reranking, and
-online retrieval remain later delivery work.
+online retrieval and its vector/lexical indexes remain later delivery work.

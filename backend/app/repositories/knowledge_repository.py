@@ -6,9 +6,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.ingestion.knowledge_types import SourceMaterial
+from app.ingestion.embedding_profiles import embedding_profile_key
 from app.ingestion.types import ChunkDraft
 from app.models import (
-    Issue, IssueComment, IssueLabel, KnowledgeChunk, KnowledgeSource, Label,
+    EmbeddingProfile, Issue, IssueComment, IssueLabel, KnowledgeEmbedding,
+    KnowledgeNode, KnowledgeSource, Label,
     Project, ProjectMilestone, ProjectObjective, ProjectUpdate, Team, User,
     WorkflowState,
 )
@@ -168,15 +170,16 @@ class KnowledgeRepository:
         embedding_dimensions: int,
     ) -> bool:
         source = self._source(material.source_type, material.source_id)
+        profile = self._profile(
+            embedding_provider, embedding_model, embedding_dimensions, create=False
+        )
         return bool(
-            source and source.status == "ready" and source.deleted_at is None
+            source and profile and source.status == "ready" and source.deleted_at is None
             and source.source_version == material.source_version
             and source.content_hash == content_hash
             and source.renderer_version == renderer_version
             and source.chunker_version == chunker_version
-            and source.embedding_provider == embedding_provider
-            and source.embedding_model == embedding_model
-            and source.embedding_dimensions == embedding_dimensions
+            and source.active_embedding_profile_id == profile.id
         )
 
     def begin(
@@ -184,6 +187,10 @@ class KnowledgeRepository:
         chunker_version: str, embedding_provider: str, embedding_model: str,
         embedding_dimensions: int,
     ) -> None:
+        profile = self._profile(
+            embedding_provider, embedding_model, embedding_dimensions, create=True
+        )
+        assert profile is not None
         source = self._source(material.source_type, material.source_id)
         if source is None:
             source = KnowledgeSource(
@@ -191,8 +198,7 @@ class KnowledgeRepository:
                 team_id=material.team_id, source_type=material.source_type,
                 source_id=material.source_id, content_hash=content_hash,
                 renderer_version=renderer_version, chunker_version=chunker_version,
-                embedding_provider=embedding_provider, embedding_model=embedding_model,
-                embedding_dimensions=embedding_dimensions,
+                active_embedding_profile_id=profile.id,
             )
             self.db.add(source)
         source.workspace_id = material.workspace_id
@@ -203,9 +209,7 @@ class KnowledgeRepository:
         source.content_hash = content_hash
         source.renderer_version = renderer_version
         source.chunker_version = chunker_version
-        source.embedding_provider = embedding_provider
-        source.embedding_model = embedding_model
-        source.embedding_dimensions = embedding_dimensions
+        source.active_embedding_profile_id = profile.id
         source.status = "embedding"
         source.error_code = None
         source.error_message = None
@@ -230,26 +234,38 @@ class KnowledgeRepository:
         source.content_hash = content_hash
         source.renderer_version = renderer_version
         source.chunker_version = chunker_version
-        source.embedding_provider = embedding_provider
-        source.embedding_model = embedding_model
-        source.embedding_dimensions = embedding_dimensions
+        profile = self._profile(
+            embedding_provider, embedding_model, embedding_dimensions, create=True
+        )
+        assert profile is not None
+        source.active_embedding_profile_id = profile.id
         source.status = "embedding"
         source.error_code = None
         source.error_message = None
         source.deleted_at = None
         self.db.flush()
-        self.db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.knowledge_source_id == source.id))
+        self._delete_nodes(source.id)
         for chunk, embedding in zip(chunks, embeddings, strict=True):
-            self.db.add(KnowledgeChunk(
-                id=str(uuid.uuid4()), knowledge_source_id=source.id,
+            node_id = str(uuid.uuid4())
+            chunk_hash = sha256(chunk.content.encode()).hexdigest()
+            self.db.add(KnowledgeNode(
+                id=node_id, knowledge_source_id=source.id,
+                parent_node_id=None, document_page_id=None,
                 workspace_id=material.workspace_id, team_id=material.team_id,
                 project_id=material.project_id, issue_id=material.issue_id,
-                chunk_index=chunk.chunk_index, content=chunk.content,
-                content_hash=sha256(chunk.content.encode()).hexdigest(),
-                token_count=chunk.token_count, embedding=embedding,
-                chunk_metadata={**material.metadata, **chunk.metadata,
-                                "source_type": material.source_type,
-                                "source_id": material.source_id},
+                node_key=f"chunk:{chunk.chunk_index}", node_kind="chunk",
+                modality="text", indexable=True, ordinal=chunk.chunk_index,
+                content=chunk.content, content_hash=chunk_hash,
+                token_count=chunk.token_count,
+                page_from=chunk.page_number, page_to=chunk.page_number,
+                heading_path=chunk.heading_path,
+                node_metadata={**material.metadata, **chunk.metadata,
+                               "source_type": material.source_type,
+                               "source_id": material.source_id},
+            ))
+            self.db.add(KnowledgeEmbedding(
+                knowledge_node_id=node_id, embedding_profile_id=profile.id,
+                content_hash=chunk_hash, embedding=embedding,
             ))
         source.status = "ready"
         source.indexed_at = datetime.now(timezone.utc)
@@ -259,7 +275,7 @@ class KnowledgeRepository:
         source = self._source(source_type, source_id)
         if source is None:
             return
-        self.db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.knowledge_source_id == source.id))
+        self._delete_nodes(source.id)
         source.status = "deleted"
         source.deleted_at = datetime.now(timezone.utc)
         self.db.commit()
@@ -278,3 +294,29 @@ class KnowledgeRepository:
             KnowledgeSource.source_type == source_type,
             KnowledgeSource.source_id == source_id,
         ))
+
+    def _profile(
+        self, provider: str, model: str, dimensions: int, *, create: bool
+    ) -> EmbeddingProfile | None:
+        key = embedding_profile_key(provider, model, dimensions)
+        profile = self.db.scalar(
+            select(EmbeddingProfile).where(EmbeddingProfile.profile_key == key)
+        )
+        if profile is None and create:
+            profile = EmbeddingProfile(
+                id=str(uuid.uuid4()), profile_key=key, provider=provider,
+                model=model, dimensions=dimensions, distance_metric="cosine", normalized=True,
+            )
+            self.db.add(profile)
+            self.db.flush()
+        return profile
+
+    def _delete_nodes(self, source_id: str) -> None:
+        node_ids = list(self.db.scalars(
+            select(KnowledgeNode.id).where(KnowledgeNode.knowledge_source_id == source_id)
+        ))
+        if node_ids:
+            self.db.execute(delete(KnowledgeEmbedding).where(
+                KnowledgeEmbedding.knowledge_node_id.in_(node_ids)
+            ))
+            self.db.execute(delete(KnowledgeNode).where(KnowledgeNode.id.in_(node_ids)))

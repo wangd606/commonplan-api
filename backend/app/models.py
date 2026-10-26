@@ -592,11 +592,11 @@ class KnowledgeSource(Base):
     )
     source_version: Mapped[int] = mapped_column(BigInteger, default=1)
     content_hash: Mapped[str] = mapped_column(String(64))
-    renderer_version: Mapped[str] = mapped_column(String(40))
+    renderer_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     chunker_version: Mapped[str] = mapped_column(String(40))
-    embedding_provider: Mapped[str] = mapped_column(String(40))
-    embedding_model: Mapped[str] = mapped_column(String(160))
-    embedding_dimensions: Mapped[int] = mapped_column()
+    active_embedding_profile_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("embedding_profiles.id"), index=True
+    )
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -608,13 +608,39 @@ class KnowledgeSource(Base):
     )
 
 
-class KnowledgeChunk(Base):
-    __tablename__ = "knowledge_chunks"
-    __table_args__ = (UniqueConstraint("knowledge_source_id", "chunk_index"),)
+class EmbeddingProfile(Base):
+    __tablename__ = "embedding_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profile_key: Mapped[str] = mapped_column(String(240), unique=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    model: Mapped[str] = mapped_column(String(180))
+    dimensions: Mapped[int] = mapped_column()
+    distance_metric: Mapped[str] = mapped_column(String(24), default="cosine")
+    normalized: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeNode(Base):
+    __tablename__ = "knowledge_nodes"
+    __table_args__ = (
+        UniqueConstraint("knowledge_source_id", "node_key"),
+        CheckConstraint(
+            "(issue_id IS NOT NULL AND project_id IS NULL) OR "
+            "(issue_id IS NULL AND project_id IS NOT NULL)",
+            name="ck_knowledge_node_scope",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     knowledge_source_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
+    )
+    parent_node_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    document_page_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("document_pages.id", ondelete="SET NULL"), nullable=True, index=True
     )
     workspace_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
@@ -628,13 +654,36 @@ class KnowledgeChunk(Base):
     issue_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("issues.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    chunk_index: Mapped[int] = mapped_column()
+    node_key: Mapped[str] = mapped_column(String(160))
+    node_kind: Mapped[str] = mapped_column(String(32), default="chunk")
+    modality: Mapped[str] = mapped_column(String(24), default="text")
+    indexable: Mapped[bool] = mapped_column(default=True)
+    ordinal: Mapped[int] = mapped_column()
     content: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))
     token_count: Mapped[int] = mapped_column()
-    embedding: Mapped[list[float]] = mapped_column(VECTOR(1024), nullable=False)
-    chunk_metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    page_from: Mapped[int | None] = mapped_column(nullable=True)
+    page_to: Mapped[int | None] = mapped_column(nullable=True)
+    heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    node_metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeEmbedding(Base):
+    __tablename__ = "knowledge_embeddings"
+
+    knowledge_node_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), primary_key=True
+    )
+    embedding_profile_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("embedding_profiles.id"), primary_key=True, index=True
+    )
+    content_hash: Mapped[str] = mapped_column(String(64))
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class DocumentIngestion(Base):
@@ -647,13 +696,16 @@ class DocumentIngestion(Base):
     workspace_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
+    knowledge_source_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("knowledge_sources.id", ondelete="CASCADE"), unique=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     parser_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     chunker_version: Mapped[str] = mapped_column(String(40))
-    embedding_provider: Mapped[str] = mapped_column(String(40))
-    embedding_model: Mapped[str] = mapped_column(String(120))
-    embedding_dimensions: Mapped[int] = mapped_column()
+    embedding_profile_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("embedding_profiles.id"), index=True
+    )
     content_sha256: Mapped[str] = mapped_column(String(64))
     attempts: Mapped[int] = mapped_column(default=0)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -680,45 +732,3 @@ class DocumentPage(Base):
     markdown_content: Mapped[str] = mapped_column(Text)
     plain_text: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column()
-
-
-class DocumentChunk(Base):
-    __tablename__ = "document_chunks"
-    __table_args__ = (
-        UniqueConstraint("ingestion_id", "chunk_index"),
-        CheckConstraint(
-            "(issue_id IS NOT NULL AND project_id IS NULL) OR "
-            "(issue_id IS NULL AND project_id IS NOT NULL)",
-            name="ck_document_chunk_scope",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    ingestion_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("document_ingestions.id", ondelete="CASCADE"), index=True
-    )
-    parent_page_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("document_pages.id", ondelete="CASCADE"), index=True
-    )
-    workspace_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
-    )
-    team_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("teams.id", ondelete="CASCADE"), index=True
-    )
-    issue_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("issues.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    project_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    chunk_index: Mapped[int] = mapped_column()
-    content: Mapped[str] = mapped_column(Text)
-    content_hash: Mapped[str] = mapped_column(String(64))
-    token_count: Mapped[int] = mapped_column()
-    page_from: Mapped[int] = mapped_column()
-    page_to: Mapped[int] = mapped_column()
-    heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    embedding: Mapped[list[float]] = mapped_column(VECTOR(1024), nullable=False)
-    chunk_metadata: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

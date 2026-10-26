@@ -79,12 +79,12 @@ The initial vector index can use `pgvector` alongside product metadata in Busine
 attachments and parsing artifacts belong in object storage. A separate vector database should be
 introduced only after measured scale or retrieval requirements justify it.
 
-The **Retrieval Corpus** in the visual is a data boundary—object storage, PostgreSQL full-text data,
-ACL metadata, and pgvector chunks—not an independently deployed microservice. Ingestion Worker writes
+The **Retrieval Corpus** in the visual is a data boundary—object storage, source-specific parse
+artifacts, canonical knowledge nodes, ACL metadata, embedding profiles, and pgvector representations—not an independently deployed microservice. Ingestion Worker writes
 it through repositories and AI/RAG Service reads it with mandatory authorization predicates.
 
-Current delivery status is narrower than this target: object storage, parent pages, ACL-scoped chunks,
-canonical pgvector embeddings, and the local LiteLLM-to-TEI embedding path are implemented.
+Current delivery status is narrower than this target: object storage, parent pages, ACL-scoped
+knowledge nodes, profile-versioned pgvector embeddings, and the local LiteLLM-to-TEI embedding path are implemented.
 Full-text/vector search indexes, query embedding, authorized candidate retrieval, reranking,
 citations, generation, and the production gateway control plane are not. See the staged production
 work in the [model gateway decision](model-gateway-decision.md).

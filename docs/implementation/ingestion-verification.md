@@ -2,7 +2,7 @@
 
 This runbook deliberately stops before similarity search. Its acceptance
 boundary is: a completed attachment is parsed, chunked, embedded, and stored as
-authorized `vector(1024)` rows that can be inspected independently of any
+authorized knowledge nodes and model-profile embeddings that can be inspected independently of any
 retrieval or answer-generation behavior.
 
 ## 1. Start the ingestion stack
@@ -11,9 +11,8 @@ retrieval or answer-generation behavior.
 docker compose up --build db redis redpanda debezium auth-service embedding-service model-gateway backend ingestion-worker
 ```
 
-The database image includes pgvector. Alembic enables the extension and changes
-`document_chunks.embedding` from the temporary JSONB representation to the
-canonical `vector(1024)` type. The first start downloads the pinned Qwen model
+The database image includes pgvector. Alembic creates a canonical source/node corpus and stores
+model-specific vectors separately in `knowledge_embeddings`. The first start downloads the pinned Qwen model
 and Docling assets into persistent volumes. Wait for both runtime boundaries:
 
 ```bash
@@ -52,7 +51,7 @@ parsing and embeddings asynchronously.
 
 Creating or editing an Issue, Project or Comment follows the same broker path without Docling. The
 worker loads the authoritative record through `KnowledgeRepository`, renders canonical Markdown and
-writes `knowledge_sources` plus `knowledge_chunks`.
+writes `knowledge_sources`, `knowledge_nodes`, and `knowledge_embeddings`.
 
 The authenticated status endpoint is:
 
@@ -86,16 +85,21 @@ For a successful upload, verify:
 Inspect database-source embeddings:
 
 ```sql
-SELECT source_type, source_id, status, source_version, renderer_version,
-       embedding_model, indexed_at
-FROM knowledge_sources
+SELECT source.source_type, source.source_id, source.status, source.source_version,
+       source.renderer_version, profile.model AS embedding_model, source.indexed_at
+FROM knowledge_sources AS source
+JOIN embedding_profiles AS profile ON profile.id = source.active_embedding_profile_id
 ORDER BY indexed_at DESC;
 
-SELECT source.source_type, source.source_id, chunk.chunk_index,
-       left(chunk.content, 160), vector_dims(chunk.embedding)
-FROM knowledge_chunks AS chunk
-JOIN knowledge_sources AS source ON source.id = chunk.knowledge_source_id
-ORDER BY source.indexed_at DESC, chunk.chunk_index;
+SELECT source.source_type, source.source_id, node.ordinal,
+       left(node.content, 160), vector_dims(embedding.embedding)
+FROM knowledge_nodes AS node
+JOIN knowledge_sources AS source ON source.id = node.knowledge_source_id
+JOIN knowledge_embeddings AS embedding
+  ON embedding.knowledge_node_id = node.id
+ AND embedding.embedding_profile_id = source.active_embedding_profile_id
+WHERE node.indexable
+ORDER BY source.indexed_at DESC, node.ordinal;
 ```
 
 To inspect one file, copy its `file_id` from the first result and add

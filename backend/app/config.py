@@ -73,10 +73,8 @@ class Settings(BaseSettings):
     def validate_cookie_settings(self) -> "Settings":
         if self.cookie_same_site == "none" and not self.cookie_secure:
             raise ValueError("SameSite=None cookies require COOKIE_SECURE=true")
-        if self.ingestion_embedding_dimensions != 1024:
-            raise ValueError(
-                "INGESTION_EMBEDDING_DIMENSIONS must match the canonical vector(1024) schema"
-            )
+        if self.ingestion_embedding_dimensions < 1:
+            raise ValueError("INGESTION_EMBEDDING_DIMENSIONS must be positive")
         return self
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)

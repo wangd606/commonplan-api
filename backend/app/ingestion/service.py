@@ -74,6 +74,7 @@ class IngestionService:
             return
         ingestion = self.repository.begin(
             file,
+            scope,
             content_sha256=digest,
             chunker_version=CHUNKER_VERSION,
             embedding_provider=self.embeddings.provider,

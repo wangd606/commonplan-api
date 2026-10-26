@@ -124,7 +124,7 @@ class AttachmentService:
         result = self.repository.ingestion(file_id)
         if result is None:
             return {"file_asset_id": file_id, "status": "not_started", "page_count": 0, "chunk_count": 0}
-        record, page_count, chunk_count = result
+        record, profile, page_count, chunk_count = result
         return {
             "id": record.id,
             "file_asset_id": record.file_asset_id,
@@ -132,9 +132,9 @@ class AttachmentService:
             "parser_name": record.parser_name,
             "parser_version": record.parser_version,
             "chunker_version": record.chunker_version,
-            "embedding_provider": record.embedding_provider,
-            "embedding_model": record.embedding_model,
-            "embedding_dimensions": record.embedding_dimensions,
+            "embedding_provider": profile.provider,
+            "embedding_model": profile.model,
+            "embedding_dimensions": profile.dimensions,
             "attempts": record.attempts,
             "error_code": record.error_code,
             "error_message": record.error_message,

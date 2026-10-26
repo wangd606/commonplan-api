@@ -100,13 +100,14 @@ erDiagram
     FILE_ASSETS ||--o{ OUTBOX_EVENTS : emits
     FILE_ASSETS ||--o| DOCUMENT_INGESTIONS : ingests
     WORKSPACES ||--o{ DOCUMENT_INGESTIONS : scopes
+    KNOWLEDGE_SOURCES ||--o| DOCUMENT_INGESTIONS : describes
+    EMBEDDING_PROFILES ||--o{ DOCUMENT_INGESTIONS : activates
     DOCUMENT_INGESTIONS ||--o{ DOCUMENT_PAGES : contains
-    DOCUMENT_INGESTIONS ||--o{ DOCUMENT_CHUNKS : contains
-    DOCUMENT_PAGES ||--o{ DOCUMENT_CHUNKS : parents
-    WORKSPACES ||--o{ DOCUMENT_CHUNKS : scopes
-    TEAMS ||--o{ DOCUMENT_CHUNKS : scopes
-    ISSUES |o--o{ DOCUMENT_CHUNKS : sources
-    PROJECTS |o--o{ DOCUMENT_CHUNKS : sources
+    KNOWLEDGE_SOURCES ||--o{ KNOWLEDGE_NODES : contains
+    KNOWLEDGE_NODES |o--o{ KNOWLEDGE_NODES : parents
+    DOCUMENT_PAGES |o--o{ KNOWLEDGE_NODES : provenance
+    KNOWLEDGE_NODES ||--o{ KNOWLEDGE_EMBEDDINGS : represents
+    EMBEDDING_PROFILES ||--o{ KNOWLEDGE_EMBEDDINGS : encodes
 
     USERS {
         integer id PK
@@ -294,17 +295,29 @@ erDiagram
         text last_error
         timestamptz published_at
     }
+    KNOWLEDGE_SOURCES {
+        varchar_36 id PK
+        varchar_36 workspace_id FK
+        varchar_36 team_id FK
+        varchar_40 source_type
+        varchar_36 source_id
+        varchar_36 project_id FK
+        varchar_36 issue_id FK
+        varchar_36 active_embedding_profile_id FK
+        bigint source_version
+        varchar_64 content_hash
+        varchar_24 status
+    }
     DOCUMENT_INGESTIONS {
         varchar_36 id PK
         varchar_36 file_asset_id FK, UK
         varchar_36 workspace_id FK
+        varchar_36 knowledge_source_id FK, UK
+        varchar_36 embedding_profile_id FK
         varchar_24 status
         varchar_80 parser_name
         varchar_40 parser_version
         varchar_40 chunker_version
-        varchar_40 embedding_provider
-        varchar_120 embedding_model
-        integer embedding_dimensions
         varchar_64 content_sha256
         integer attempts
         text error_message
@@ -319,18 +332,37 @@ erDiagram
         text plain_text
         integer token_count
     }
-    DOCUMENT_CHUNKS {
+    EMBEDDING_PROFILES {
         varchar_36 id PK
-        varchar_36 ingestion_id FK
-        varchar_36 parent_page_id FK
+        varchar_240 profile_key UK
+        varchar_40 provider
+        varchar_180 model
+        integer dimensions
+        varchar_24 distance_metric
+        boolean normalized
+    }
+    KNOWLEDGE_NODES {
+        varchar_36 id PK
+        varchar_36 knowledge_source_id FK
+        varchar_36 parent_node_id FK
+        varchar_36 document_page_id FK
         varchar_36 workspace_id FK
         varchar_36 team_id FK
         varchar_36 issue_id FK
         varchar_36 project_id FK
-        integer chunk_index
+        varchar_160 node_key
+        varchar_32 node_kind
+        varchar_24 modality
+        boolean indexable
+        integer ordinal
         text content
-        vector_1024 embedding
-        jsonb chunk_metadata
+        jsonb node_metadata
+    }
+    KNOWLEDGE_EMBEDDINGS {
+        varchar_36 knowledge_node_id PK, FK
+        varchar_36 embedding_profile_id PK, FK
+        varchar_64 content_hash
+        vector embedding
     }
 ```
 
@@ -371,11 +403,12 @@ The `(auth_issuer, auth_subject)` badges denote the partial composite unique ind
 | Business | `issue_attachments` | `IssueAttachment` | Foreign-key-safe link from one file asset to an issue |
 | Business | `project_attachments` | `ProjectAttachment` | Foreign-key-safe link from one file asset to a project |
 | Business | `outbox_events` | `OutboxEvent` | Append-only transaction bridge captured from PostgreSQL WAL by Debezium |
-| Business | `knowledge_sources` | `KnowledgeSource` | Current indexed identity, source/model versions, content hash, scope and status |
-| Business | `knowledge_chunks` | `KnowledgeChunk` | ACL-scoped database-source text, metadata and `vector(1024)` embeddings |
-| Business | `document_ingestions` | `DocumentIngestion` | Versioned per-file parser/chunker/embedding lifecycle, retry state, and tombstone |
+| Business | `knowledge_sources` | `KnowledgeSource` | Canonical attachment/database-source identity, version, content hash, ACL scope and lifecycle |
+| Business | `knowledge_nodes` | `KnowledgeNode` | Source-agnostic parent/child content nodes with modality, provenance and ACL scope |
+| Business | `embedding_profiles` | `EmbeddingProfile` | Compatible vector-space identity: provider, model/revision, dimensions and metric |
+| Business | `knowledge_embeddings` | `KnowledgeEmbedding` | Model-specific pgvector representation of one knowledge node; no ANN index yet |
+| Business | `document_ingestions` | `DocumentIngestion` | Versioned per-file parser/chunker/profile lifecycle, retry state, and tombstone |
 | Business | `document_pages` | `DocumentPage` | Parsed parent-page Markdown/plain text and heading provenance |
-| Business | `document_chunks` | `DocumentChunk` | ACL-scoped canonical chunk text, provenance, metadata, and `vector(1024)` embedding |
 
 ## Cross-database identity mapping
 

@@ -64,8 +64,8 @@ Paths in this matrix omit the `/api/v1` prefix unless explicitly shown; the GitH
 | Personal timezone/default team/notification switches | `user_preferences`, `notification_preferences` | `PATCH /me/preferences`, notification-preference APIs |
 | Workspace profile and invite/domain rules | `workspaces`, `workspace_settings`, `workspace_allowed_domains` | `GET/PATCH .../settings`, allowed-domain APIs |
 | GitHub PR auto-linking | `github_pull_requests`, `issue_pr_links`, `github_webhook_deliveries` | Signed `POST /webhooks/github`, issue PR read API |
-| Searchable knowledge corpus | `file_assets`, typed link tables, `outbox_events`, `knowledge_sources`, `knowledge_chunks` | Attachment lifecycle plus CDC-driven indexing of files, issues, comments, projects, and project updates |
-| Document parsing and embeddings | `document_ingestions`, `document_pages`, `document_chunks` | Authorized ingestion-status API; no search API yet |
+| Searchable knowledge corpus | `file_assets`, typed link tables, `outbox_events`, `knowledge_sources`, `knowledge_nodes` | Attachment lifecycle plus CDC-driven ingestion of files, issues, comments, projects, and project updates |
+| Parsing and model representations | `document_ingestions`, `document_pages`, `embedding_profiles`, `knowledge_embeddings` | Source-specific parse artifacts plus versioned pgvector representations; no search API/index yet |
 | SSO, API keys, billing, import/export, agent settings | Future bounded contexts, not implied by a visual menu | Separate specification before writable endpoints |
 
 ## Assumptions to confirm

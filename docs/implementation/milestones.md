@@ -263,8 +263,8 @@ Consume durable knowledge events asynchronously. Index both uploaded documents a
 Delivery is split into two reviewable vertical slices:
 
 - KEY-11 ingestion foundation: business mutations append versioned knowledge events in the same PostgreSQL transaction; Debezium captures the append-only outbox from WAL and publishes to Redpanda through the Kafka protocol. A consumer-group worker handles retries and a dead-letter topic, then routes attachments through production Docling/hybrid chunking and database records through deterministic Markdown rendering/overlapping chunks. Both paths use the pinned local Qwen embedding alias through the private model gateway and persist ACL-scoped, versioned chunks plus delete tombstones. Consumer offsets—not mutable outbox rows—own delivery progress.
-- Retrieval completion: add the vector similarity index and lexical index on the existing canonical
-  `vector(1024)` chunks, authorization-filtered candidate queries, parent-page/neighbor expansion,
+- Retrieval completion: add profile-specific vector similarity indexes and a lexical index over the
+  canonical knowledge nodes/embeddings, authorization-filtered candidate queries, parent-page/neighbor expansion,
   fusion, reranking, citations, and bilingual evaluation fixtures. The pgvector storage foundation is
   implemented; retrieval is not shipped until an authorized search API and its quality/security tests
   exist.

@@ -8,13 +8,18 @@ from app.database import Base
 from app.config import settings
 from app.infrastructure.object_storage import LocalObjectStorage, StoredObject
 from app.ingestion.embeddings import LocalHashEmbeddingProvider
+from app.ingestion.knowledge_service import KnowledgeIngestionService
 from app.ingestion.parsers import ParserRegistry
 from app.ingestion.service import IngestionService
 from app.ingestion.knowledge_types import KnowledgeEvent
-from app.models import DocumentChunk, DocumentIngestion, DocumentPage, OutboxEvent, User
+from app.models import (
+    DocumentIngestion, DocumentPage, EmbeddingProfile, KnowledgeEmbedding, KnowledgeNode,
+    KnowledgeSource, OutboxEvent, User,
+)
 from app.repositories.attachment_repository import SqlAlchemyAttachmentRepository
 from app.repositories.issue_repository import SqlAlchemyIssueRepository
 from app.repositories.ingestion_repository import IngestionRepository
+from app.repositories.knowledge_repository import KnowledgeRepository
 from app.repositories.outbox_repository import SqlAlchemyOutboxRepository
 from app.repositories.project_repository import SqlAlchemyProjectRepository
 from app.repositories.workspace_repository import SqlAlchemyWorkspaceRepository
@@ -185,16 +190,18 @@ def test_ready_event_is_ingested_idempotently_and_delete_tombstones(context, mon
 
     record = db.scalars(select(DocumentIngestion)).one()
     assert record.status == "ready"
-    assert record.embedding_provider == "local_hash"
+    assert db.get(EmbeddingProfile, record.embedding_profile_id).provider == "local_hash"
     assert len(list(db.scalars(select(DocumentPage)))) == 1
-    chunks = list(db.scalars(select(DocumentChunk).order_by(DocumentChunk.chunk_index)))
+    chunks = list(db.scalars(select(KnowledgeNode).order_by(KnowledgeNode.ordinal)))
     assert len(chunks) == 4
-    assert len(chunks[0].embedding) == 16
     assert chunks[0].issue_id == issue.id and chunks[0].project_id is None
+    embeddings = list(db.scalars(select(KnowledgeEmbedding)))
+    assert len(embeddings) == 4
+    assert len(embeddings[0].embedding) == 16
     assert attachments.ingestion_status(owner, workspace.id, asset.id)["chunk_count"] == 4
 
     ingestion.process(event)
-    assert len(list(db.scalars(select(DocumentChunk)))) == 4
+    assert len(list(db.scalars(select(KnowledgeNode)))) == 4
 
     attachments.delete(owner, workspace.id, asset.id)
     deleted = KnowledgeEvent(
@@ -206,4 +213,50 @@ def test_ready_event_is_ingested_idempotently_and_delete_tombstones(context, mon
     db.refresh(record)
     assert record.status == "deleted"
     assert list(db.scalars(select(DocumentPage))) == []
-    assert list(db.scalars(select(DocumentChunk))) == []
+    assert list(db.scalars(select(KnowledgeNode))) == []
+    assert list(db.scalars(select(KnowledgeEmbedding))) == []
+
+
+def test_database_record_ingestion_uses_canonical_nodes_and_profiles(context, monkeypatch):
+    db, _attachments, _storage, _owner, workspace, _team, issue, _project = context
+    monkeypatch.setattr(settings, "ingestion_chunk_tokens", 300)
+    monkeypatch.setattr(settings, "ingestion_chunk_overlap_tokens", 50)
+    service = KnowledgeIngestionService(
+        KnowledgeRepository(db), LocalHashEmbeddingProvider(12)
+    )
+    event = KnowledgeEvent(
+        event_id="issue-upsert", workspace_id=workspace.id,
+        source_type="issue", source_id=issue.id,
+        source_version=issue.version, operation="upsert",
+    )
+
+    service.process(event)
+
+    source = db.scalars(select(KnowledgeSource).where(
+        KnowledgeSource.source_type == "issue",
+        KnowledgeSource.source_id == issue.id,
+    )).one()
+    nodes = list(db.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.knowledge_source_id == source.id
+    )))
+    assert source.status == "ready"
+    assert len(nodes) == 1
+    assert nodes[0].node_key == "chunk:0"
+    embedding = db.get(KnowledgeEmbedding, (nodes[0].id, source.active_embedding_profile_id))
+    assert embedding is not None and len(embedding.embedding) == 12
+
+    service.process(event)
+    assert len(list(db.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.knowledge_source_id == source.id
+    )))) == 1
+
+    service.process(KnowledgeEvent(
+        event_id="issue-delete", workspace_id=workspace.id,
+        source_type="issue", source_id=issue.id,
+        source_version=issue.version, operation="delete",
+    ))
+    db.refresh(source)
+    assert source.status == "deleted"
+    assert list(db.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.knowledge_source_id == source.id
+    ))) == []

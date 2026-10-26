@@ -31,7 +31,7 @@ claiming any tool integration is complete.
 
 | Store | Authority |
 | --- | --- |
-| Business PostgreSQL (`zhitong`) | Product entities, local profile projection, browser auth-session vault, application sessions, GitHub records, append-only outbox, file ingestion artifacts, knowledge sources/chunks, and canonical `vector(1024)` embeddings. |
+| Business PostgreSQL (`zhitong`) | Product entities, local profile projection, browser auth-session vault, application sessions, GitHub records, append-only outbox, file parse artifacts, canonical knowledge sources/nodes, embedding profiles, and pgvector representations. |
 | Redpanda log | Durable knowledge events, consumer offsets and DLQ records. It is transport/replay state, not the source of truth for product content. |
 | Auth PostgreSQL (`zhitong_auth`) | Identity users, password hashes, external identities, refresh-token hash families, login codes, and login attempts. |
 | Redis | Disposable read-through cache for application sessions. PostgreSQL remains the source of truth. |
@@ -77,7 +77,7 @@ worker's repository—not either model component—writes pgvector rows.
 ## Implemented knowledge-ingestion boundary and remaining RAG seam
 
 The offline ingestion foundation includes attachments and high-context database records, but it deliberately stops before search. There is no
-vector/lexical search endpoint, query embedding path, ACL-filtered candidate retrieval, reranker,
+HNSW/lexical index, search endpoint, query embedding path, ACL-filtered candidate retrieval, reranker,
 citation assembler, or answer-generation model. LiteLLM is implemented locally for the embedding
 path; production gateway PostgreSQL/virtual keys, budgets, and multi-replica governance remain a
 deployment follow-up. Any future diagram must continue to distinguish implemented ingestion from
