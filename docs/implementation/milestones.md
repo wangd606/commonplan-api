@@ -255,10 +255,10 @@ discovery or execution.
 
 ## M12 — RAG ingestion and retrieval
 
-**Status:** ingestion slice implemented in KEY-11. KEY-20 R1 deterministic retrieval and stacked R2
-hybrid retrieval are implemented: ACL-filtered channels, RRF fusion, parent/neighbor expansion,
-explainable local reranking, a bilingual evaluation contract, and a workspace Retrieval Lab. Neural
-reranking, citations, answer generation, and Agentic RAG remain pending.
+**Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R3 are implemented: ACL-filtered
+channels, RRF fusion, parent/neighbor expansion, explainable local reranking, a bilingual evaluation
+contract, Retrieval Lab, bounded evidence assembly, and claim-level grounded citations. Neural
+reranking and R4 Agentic RAG remain pending.
 
 Consume durable knowledge events asynchronously. Index both uploaded documents and contextual product records—issues, comments, projects, project objectives, milestones, and project updates—with workspace/team/resource ACL metadata. Extract supported documents, render database records deterministically, record parser/renderer/version/checksum, chunk content, generate embeddings, and store tombstones for deleted sources. Retrieval must apply authorization before returning chunks. Ingestion stays retryable and observable, and neither an upload nor a business mutation depends on model or vector-store availability.
 
@@ -268,8 +268,9 @@ Delivery is split into two reviewable vertical slices:
 - Retrieval completion: R1 adds a 1,024-dimensional HNSW expression index, full-text/trigram lexical
   indexes, same-profile query embedding, authorization-filtered candidate queries, and separate
   rankings for inspection. R2 adds parent-page/neighbor expansion, RRF fusion, explainable local
-  reranking, a bilingual quality dataset, and the Retrieval Lab UI. R3 adds grounded answers and citations; R4 adds bounded LangGraph
-  planning/rewrite/grade loops.
+  reranking, a bilingual quality dataset, and the Retrieval Lab UI. R3 adds an explicit answer-provider
+  boundary, deterministic local grounded answers, optional LiteLLM generation, strict citation
+  validation and citation inspection UI. R4 adds bounded LangGraph planning/rewrite/grade loops.
 - Model access boundary: the local ingestion path now calls the separately deployed,
   OpenAI-compatible LiteLLM Gateway described in the
   [model-gateway decision](../architecture/model-gateway-decision.md). Ingestion uses the immutable

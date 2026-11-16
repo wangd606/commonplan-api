@@ -86,8 +86,10 @@ it through repositories and AI/RAG Service reads it with mandatory authorization
 Current delivery status is narrower than this target: object storage, parent pages, ACL-scoped
 knowledge nodes, profile-versioned pgvector embeddings, the local LiteLLM-to-TEI embedding path,
 HNSW/full-text/trigram indexes, same-profile query embedding, authorized candidate retrieval, RRF,
-context expansion, explainable local reranking, and the Retrieval Lab are implemented. Neural
-reranking, citations, generation, Agentic RAG, and the
+context expansion, explainable local reranking, bounded evidence assembly, claim-level citations,
+the answer-provider boundary, and Retrieval Lab are implemented. A local extractive provider is the
+default; the LiteLLM generation adapter is ready for an explicitly registered alias. Neural
+reranking, a deployed generation runtime, Agentic RAG, and the
 production gateway control plane are not. See the staged production
 work in the [model gateway decision](model-gateway-decision.md).
 

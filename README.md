@@ -73,7 +73,9 @@ flows. Product data/API design starts at [`docs/data-model/README.md`](docs/data
 the staged implementation plan is in [`docs/implementation/milestones.md`](docs/implementation/milestones.md).
 The AI boundary and LiteLLM/Bifrost decision are documented separately in the
 [model-gateway decision](docs/architecture/model-gateway-decision.md). The local embedding path is
-implemented through LiteLLM; production virtual keys, gateway persistence, generation, reranking, and
-R1 online retrieval exposes authorization-scoped vector and lexical candidate rankings. Stacked R2
-adds RRF fusion, parent/neighbor expansion, explainable local reranking, and a Retrieval Lab in the
-Web repository. Neural reranking, citations, answer generation, and Agentic RAG remain later work.
+implemented through LiteLLM. R1 exposes authorization-scoped vector and lexical candidates; R2 adds
+RRF fusion, parent/neighbor expansion, explainable local reranking, and Retrieval Lab diagnostics.
+R3 now assembles bounded evidence, returns claim-level citations, rejects unknown or missing source
+IDs, and supports an explicit local extractive or LiteLLM generation provider. Neural reranking and
+R4 Agentic RAG remain later work; production gateway virtual keys and persistence remain deployment
+work.
