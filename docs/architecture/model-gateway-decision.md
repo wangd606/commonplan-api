@@ -95,7 +95,7 @@ constraint, or if Bifrost-only routing/governance capabilities become a requirem
 | Alias | Consumer | Routing rule |
 | --- | --- | --- |
 | `commonplan-embedding-v1` | Ingestion Worker and AI/RAG query embedding | Pinned Qwen model, immutable revision and 1024 dimensions |
-| `commonplan-generation-v1` | AI/RAG answer generation | Approved generation deployments with evaluated fallback behavior |
+| `commonplan-generation-v1` | R3 grounded-answer provider | Optional approved generation deployments; every returned claim is revalidated against request-local citation IDs |
 | `commonplan-rerank-v1` | AI/RAG candidate reranking | Future explicit reranker profile; never inferred from the generation alias |
 
 The alias is a product contract, not permission to change vector space. `commonplan-embedding-v1` may
@@ -133,8 +133,10 @@ regression suite.
 3. **Implemented for ingestion:** switch Ingestion Worker to the `EmbeddingProvider` model-client
    interface targeting the gateway. The worker knows only the gateway URL, service credential, and
    stable alias; LiteLLM alone knows the TEI URL. The future query embedder must reuse this path.
-4. Add generation/rerank aliases only with quality, streaming, timeout, error-mapping, cost and privacy
-   tests. Enable retries and fallbacks per alias rather than globally.
+4. **R3 client contract implemented:** the application can call `commonplan-generation-v1` for
+   structured claims, treats retrieved evidence as untrusted prompt data, and rejects uncited or
+   unknown citations. Register an actual generation deployment only with quality, timeout,
+   error-mapping, cost and privacy tests. Enable retries and fallbacks per alias rather than globally.
 5. Before final production selection, run the same conformance and load suite against Bifrost. A switch
    changes deployment/configuration, not the service-facing API.
 6. **Implemented as deployable scaffolding:** keep a separate optional LiteLLM `tool-gateway` process
