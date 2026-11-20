@@ -8,7 +8,6 @@ from app.retrieval.answering import (
     GroundedClaim,
     ModelGatewayGroundedAnswerProvider,
     assemble_citations,
-    render_answer,
     validate_draft,
 )
 
@@ -58,7 +57,7 @@ def test_invalid_or_missing_model_citations_are_rejected():
         )
 
 
-def test_extractive_answer_is_composed_only_from_evidence():
+def test_extractive_provider_exposes_evidence_without_claiming_an_answer():
     provider = ExtractiveGroundedAnswerProvider()
 
     draft = validate_draft(
@@ -67,8 +66,8 @@ def test_extractive_answer_is_composed_only_from_evidence():
         max_claims=5,
     )
 
-    assert draft.claims[0].text in citation().excerpt
-    assert render_answer(draft).endswith("[S1]")
+    assert provider.output_mode == "evidence_only"
+    assert draft.claims == ()
 
 
 def test_model_gateway_requires_structured_known_citations(monkeypatch):

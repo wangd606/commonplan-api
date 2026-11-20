@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import json
-import re
 from typing import Protocol
 
 import httpx
@@ -38,6 +37,7 @@ class AnswerDraft:
 class GroundedAnswerProvider(Protocol):
     provider: str
     model: str
+    output_mode: str
 
     def generate(
         self,
@@ -114,44 +114,23 @@ def render_answer(draft: AnswerDraft) -> str:
 
 
 class ExtractiveGroundedAnswerProvider:
-    """A no-LLM local mode whose claims are literal evidence excerpts."""
+    """A no-LLM local mode that exposes evidence without claiming to answer."""
 
     provider = "extractive"
     model = "deterministic-extractive-v1"
+    output_mode = "evidence_only"
 
     def generate(
         self,
         query: str,
         citations: list[AnswerCitation],
     ) -> AnswerDraft:
-        if not citations:
-            return AnswerDraft(claims=())
-        query_terms = {
-            token for token in re.findall(r"[\w-]+", query.casefold()) if len(token) > 1
-        }
-        claims: list[GroundedClaim] = []
-        for citation in citations[:3]:
-            sentences = [
-                item.strip()
-                for item in re.split(r"(?<=[.!?。！？])\s+|\n+", citation.excerpt)
-                if item.strip() and item.strip().casefold() != "context:"
-            ]
-            sentence = max(
-                sentences or [citation.excerpt],
-                key=lambda item: (
-                    sum(term in item.casefold() for term in query_terms),
-                    -len(item),
-                ),
-            )
-            claims.append(GroundedClaim(
-                text=sentence[:700].rstrip(),
-                citation_ids=(citation.id,),
-            ))
-        return AnswerDraft(claims=tuple(claims))
+        return AnswerDraft(claims=())
 
 
 class ModelGatewayGroundedAnswerProvider:
     provider = "model_gateway"
+    output_mode = "answer"
 
     def __init__(
         self,
