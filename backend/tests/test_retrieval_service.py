@@ -7,7 +7,11 @@ from sqlalchemy.dialects import postgresql
 from app.main import app
 from app.models import User
 from app.repositories.retrieval_repository import SqlAlchemyRetrievalRepository
-from app.retrieval.answering import AnswerDraft, GroundedClaim
+from app.retrieval.answering import (
+    AnswerDraft,
+    ExtractiveGroundedAnswerProvider,
+    GroundedClaim,
+)
 from app.retrieval.types import ContextPassage, RetrievalScope, SearchHit
 from app.schemas import (
     GroundedAnswerResponse,
@@ -49,6 +53,7 @@ class FakeEmbeddingProvider:
 class FakeAnswerProvider:
     provider = "test"
     model = "test-grounded-v1"
+    output_mode = "answer"
 
     def generate(self, query, citations):
         assert query == "Why did TA-1 fail?"
@@ -228,9 +233,36 @@ def test_grounded_answer_uses_r2_evidence_and_exposes_structured_citations():
     }]
     assert result["citations"][0]["target"] == "issue:issue-1"
     assert result["generation"]["grounded"] is True
+    assert result["generation"]["status"] == "answered"
+    assert result["generation"]["grounding_status"] == "citation_validated"
     assert result["retrieval"]["pipeline"]["fusion"] == "rrf-k60"
     serialized = GroundedAnswerResponse.model_validate(result).model_dump()
     assert serialized["citations"][0]["id"] == "S1"
+
+
+def test_extractive_mode_returns_evidence_without_presenting_it_as_an_answer():
+    service = RetrievalService(
+        FakeRepository(),
+        FakeWorkspaces(["team-a"]),
+        FakeEmbeddingProvider(),
+        ExtractiveGroundedAnswerProvider(),
+    )
+
+    result = service.answer(
+        user(), "workspace-1", query="An unrelated question",
+        team_ids=None, project_id=None, issue_id=None, limit=5,
+        candidate_limit=20, neighbor_window=1, include_parent=True,
+        max_citations=6,
+    )
+
+    assert result["answer"] is None
+    assert result["claims"] == []
+    assert result["citations"]
+    assert result["generation"]["status"] == "evidence_only"
+    assert result["generation"]["grounding_status"] == "not_generated"
+    assert result["generation"]["grounded"] is False
+    assert result["generation"]["insufficient_evidence"] is False
+    GroundedAnswerResponse.model_validate(result)
 
 
 class EmptyRows:

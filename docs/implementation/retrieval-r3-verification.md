@@ -12,7 +12,7 @@ POST /api/v1/workspaces/{workspace_id}/retrieval/answer
 
 The request accepts the R2 scope and expansion controls plus `max_citations`. The response contains:
 
-- a rendered answer for simple clients;
+- a nullable rendered answer for model-backed clients;
 - structured `claims`, each with one or more citation IDs;
 - bounded citation records with source target, excerpt, heading and page provenance;
 - provider/model identity, grounded/insufficient-evidence status and timings;
@@ -37,9 +37,10 @@ The default local mode is:
 RAG_ANSWER_PROVIDER=extractive
 ```
 
-`deterministic-extractive-v1` selects literal evidence sentences and attaches their source IDs. It
-requires no generation runtime, is suitable for local end-to-end verification, and must not be
-represented as a generative summary.
+`deterministic-extractive-v1` returns `status=evidence_only`, a null answer and the bounded retrieved
+sources. It requires no generation runtime and is suitable for local retrieval verification, but it
+does not select sentences or present retrieved text as an answer. This keeps the R3 fallback honest
+until a generation deployment is configured.
 
 After an approved generation deployment is registered behind LiteLLM, switch explicitly:
 
@@ -80,6 +81,6 @@ only network boundaries and verifies that a claim opens the exact cited evidence
 5. Ask an unsupported question. The response must state that authorized evidence is insufficient,
    with no invented claim or citation.
 
-R3 is complete when the answer remains a deterministic projection of authorized evidence under the
-local provider and the same structured validation gates a configured model provider. Answer quality
-optimization, neural reranking and agentic retry decisions are separate measured changes.
+R3 is complete when local mode exposes only authorized evidence without claiming to answer, and the
+same structured citation validation gates a configured model provider. Answer quality optimization,
+neural reranking and agentic retry decisions are separate measured changes.

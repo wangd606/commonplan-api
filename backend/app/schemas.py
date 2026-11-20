@@ -782,6 +782,8 @@ class AnswerCitationRead(BaseModel):
 class AnswerGenerationRead(BaseModel):
     provider: str
     model: str
+    status: Literal["answered", "evidence_only", "insufficient_evidence"]
+    grounding_status: Literal["citation_validated", "not_generated"]
     grounded: bool
     insufficient_evidence: bool
     timings_ms: dict[str, float]
@@ -789,7 +791,7 @@ class AnswerGenerationRead(BaseModel):
 
 class GroundedAnswerResponse(BaseModel):
     query: str
-    answer: str
+    answer: str | None
     claims: list[GroundedClaimRead]
     citations: list[AnswerCitationRead]
     generation: AnswerGenerationRead

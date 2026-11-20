@@ -207,20 +207,27 @@ class RetrievalService:
             limit=min(max_citations, settings.rag_max_citations),
         )
         generation_started = perf_counter()
-        try:
+        if self.answer_provider.output_mode == "evidence_only":
             draft = self.answer_provider.generate(query, citations)
-            draft = validate_draft(
-                draft,
-                citations,
-                max_claims=settings.rag_max_claims,
-            )
-        except (httpx.HTTPError, ValueError, AnswerGenerationError) as exc:
-            raise RetrievalUnavailable("Grounded answer generation is unavailable") from exc
+        else:
+            try:
+                draft = self.answer_provider.generate(query, citations)
+                draft = validate_draft(
+                    draft,
+                    citations,
+                    max_claims=settings.rag_max_claims,
+                )
+            except (httpx.HTTPError, ValueError, AnswerGenerationError) as exc:
+                raise RetrievalUnavailable("Grounded answer generation is unavailable") from exc
         generation_ms = (perf_counter() - generation_started) * 1000
-        insufficient = not draft.claims
-        rendered = render_answer(draft) if draft.claims else (
-            "I couldn't find enough authorized evidence to answer this question."
+        evidence_only = self.answer_provider.output_mode == "evidence_only" and bool(citations)
+        insufficient = not citations or (
+            self.answer_provider.output_mode == "answer" and not draft.claims
         )
+        status = "evidence_only" if evidence_only else (
+            "insufficient_evidence" if insufficient else "answered"
+        )
+        rendered = render_answer(draft) if draft.claims else None
         return {
             "query": query,
             "answer": rendered,
@@ -232,7 +239,11 @@ class RetrievalService:
             "generation": {
                 "provider": self.answer_provider.provider,
                 "model": self.answer_provider.model,
-                "grounded": not insufficient,
+                "status": status,
+                "grounding_status": (
+                    "citation_validated" if draft.claims else "not_generated"
+                ),
+                "grounded": bool(draft.claims),
                 "insufficient_evidence": insufficient,
                 "timings_ms": {
                     "retrieval": round(retrieval_ms, 2),
