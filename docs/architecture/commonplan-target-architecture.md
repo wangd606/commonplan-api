@@ -87,10 +87,10 @@ Current delivery status is narrower than this target: object storage, parent pag
 knowledge nodes, profile-versioned pgvector embeddings, the local LiteLLM-to-TEI embedding path,
 HNSW/full-text/trigram indexes, same-profile query embedding, authorized candidate retrieval, RRF,
 context expansion, explainable local reranking, bounded evidence assembly, claim-level citations,
-the answer-provider boundary, and Retrieval Lab are implemented. A local extractive provider is the
-default; the LiteLLM generation adapter is ready for an explicitly registered alias. Neural
-reranking, a deployed generation runtime, Agentic RAG, and the
-production gateway control plane are not. See the staged production
+the answer-provider boundary, Retrieval Lab, and bounded LangGraph orchestration are implemented.
+The LiteLLM generation adapter and Runpod Serverless route are code-complete; creating the
+account-owned endpoint and supplying its secret remain deployment actions. Neural reranking and the
+production gateway control plane are not implemented. See the staged production
 work in the [model gateway decision](model-gateway-decision.md).
 
 Ingestion and online retrieval are intentionally separate paths. A document may be indexed again

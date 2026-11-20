@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 
 from app.main import app
+from app.config import settings
 from app.models import User
 from app.repositories.retrieval_repository import SqlAlchemyRetrievalRepository
 from app.retrieval.answering import (
@@ -12,6 +13,7 @@ from app.retrieval.answering import (
     ExtractiveGroundedAnswerProvider,
     GroundedClaim,
 )
+from app.retrieval.agentic import AnswerGrade, EvidenceGrade, ModelUsage
 from app.retrieval.types import ContextPassage, RetrievalScope, SearchHit
 from app.schemas import (
     GroundedAnswerResponse,
@@ -61,6 +63,25 @@ class FakeAnswerProvider:
         return AnswerDraft((GroundedClaim(
             "TA-1 failed after the ONNX runtime upgrade.", ("S1",),
         ),))
+
+
+class FakeAgenticModel:
+    provider = "model_gateway"
+    model = "commonplan-generation-v1"
+
+    def grade_evidence(self, query, citations):
+        return EvidenceGrade(True, "enough"), ModelUsage(10, 2, 12)
+
+    def rewrite_query(self, query, citations):
+        raise AssertionError("rewrite should not be called")
+
+    def generate_answer(self, query, citations, feedback):
+        return AnswerDraft((GroundedClaim(
+            "TA-1 failed after the ONNX runtime upgrade.", ("S1",),
+        ),)), ModelUsage(20, 5, 25)
+
+    def grade_answer(self, query, citations, draft):
+        return AnswerGrade(True, "supported"), ModelUsage(12, 2, 14)
 
 
 class FakeRepository:
@@ -262,6 +283,34 @@ def test_extractive_mode_returns_evidence_without_presenting_it_as_an_answer():
     assert result["generation"]["grounding_status"] == "not_generated"
     assert result["generation"]["grounded"] is False
     assert result["generation"]["insufficient_evidence"] is False
+    GroundedAnswerResponse.model_validate(result)
+
+
+def test_agentic_answer_exposes_bounded_trace_and_usage(monkeypatch):
+    monkeypatch.setattr(settings, "rag_answer_strategy", "agentic")
+    service = RetrievalService(
+        FakeRepository(),
+        FakeWorkspaces(["team-a"]),
+        FakeEmbeddingProvider(),
+        FakeAnswerProvider(),
+        FakeAgenticModel(),
+    )
+
+    result = service.answer(
+        user(), "workspace-1", query="Why did TA-1 fail?",
+        team_ids=None, project_id=None, issue_id=None, limit=5,
+        candidate_limit=20, neighbor_window=1, include_parent=True,
+        max_citations=6,
+    )
+
+    assert result["generation"]["status"] == "answered"
+    assert result["generation"]["grounding_status"] == "agent_validated"
+    assert result["agent"]["strategy"] == "bounded-langgraph-v1"
+    assert result["agent"]["model_calls"] == 3
+    assert result["agent"]["usage"]["total_tokens"] == 51
+    assert [step["node"] for step in result["agent"]["steps"]] == [
+        "retrieve", "grade_evidence", "generate_answer", "grade_answer",
+    ]
     GroundedAnswerResponse.model_validate(result)
 
 
