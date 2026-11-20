@@ -1,0 +1,36 @@
+model_list:
+  - model_name: commonplan-embedding-v1
+    litellm_params:
+      model: openai/Qwen/Qwen3-Embedding-0.6B
+      api_base: os.environ/TEI_OPENAI_BASE_URL
+      api_key: os.environ/TEI_API_KEY
+      timeout: 120
+    model_info:
+      mode: embedding
+      base_model: Qwen/Qwen3-Embedding-0.6B
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+
+  - model_name: commonplan-generation-v1
+    litellm_params:
+      model: openai/commonplan-qwen
+      api_base: os.environ/RUNPOD_OPENAI_BASE_URL
+      api_key: os.environ/RUNPOD_API_KEY
+      timeout: 180
+      stream_timeout: 180
+    model_info:
+      mode: chat
+      base_model: Qwen/Qwen3-14B-AWQ
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  drop_params: true
+  turn_off_message_logging: true
+  request_timeout: 180
+
+router_settings:
+  # One bounded retry handles transient worker startup failures without hiding a
+  # persistently unhealthy or misconfigured Runpod endpoint.
+  num_retries: 1

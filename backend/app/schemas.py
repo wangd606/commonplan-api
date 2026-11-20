@@ -783,10 +783,34 @@ class AnswerGenerationRead(BaseModel):
     provider: str
     model: str
     status: Literal["answered", "evidence_only", "insufficient_evidence"]
-    grounding_status: Literal["citation_validated", "not_generated"]
+    grounding_status: Literal["citation_validated", "agent_validated", "not_generated"]
     grounded: bool
     insufficient_evidence: bool
     timings_ms: dict[str, float]
+
+
+class AgenticStepRead(BaseModel):
+    node: str
+    query: str
+    attempt: int
+    decision: str
+    detail: str | None = None
+
+
+class AgenticUsageRead(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class AgenticRunRead(BaseModel):
+    strategy: str
+    final_query: str
+    rewrites: int
+    answer_retries: int
+    model_calls: int
+    usage: AgenticUsageRead
+    steps: list[AgenticStepRead]
 
 
 class GroundedAnswerResponse(BaseModel):
@@ -796,3 +820,4 @@ class GroundedAnswerResponse(BaseModel):
     citations: list[AnswerCitationRead]
     generation: AnswerGenerationRead
     retrieval: HybridRetrievalSearchResponse
+    agent: AgenticRunRead | None = None

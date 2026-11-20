@@ -255,10 +255,12 @@ discovery or execution.
 
 ## M12 — RAG ingestion and retrieval
 
-**Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R3 are implemented: ACL-filtered
+**Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R4 are implemented: ACL-filtered
 channels, RRF fusion, parent/neighbor expansion, explainable local reranking, a bilingual evaluation
-contract, Retrieval Lab, bounded evidence assembly, and claim-level grounded citations. Neural
-reranking and R4 Agentic RAG remain pending.
+contract, Retrieval Lab, bounded evidence assembly, claim-level grounded citations, and a bounded
+LangGraph answer workflow. The Runpod deployment configuration is code-complete; creating the
+account-owned endpoint and providing its secret remain deployment actions. Neural reranking remains
+pending.
 
 Consume durable knowledge events asynchronously. Index both uploaded documents and contextual product records—issues, comments, projects, project objectives, milestones, and project updates—with workspace/team/resource ACL metadata. Extract supported documents, render database records deterministically, record parser/renderer/version/checksum, chunk content, generate embeddings, and store tombstones for deleted sources. Retrieval must apply authorization before returning chunks. Ingestion stays retryable and observable, and neither an upload nor a business mutation depends on model or vector-store availability.
 
@@ -270,7 +272,10 @@ Delivery is split into two reviewable vertical slices:
   rankings for inspection. R2 adds parent-page/neighbor expansion, RRF fusion, explainable local
   reranking, a bilingual quality dataset, and the Retrieval Lab UI. R3 adds an explicit answer-provider
   boundary, deterministic local grounded answers, optional LiteLLM generation, strict citation
-  validation and citation inspection UI. R4 adds bounded LangGraph planning/rewrite/grade loops.
+  validation and citation inspection UI. R4 adds a bounded LangGraph retrieve/grade/rewrite/generate/
+  grade workflow, token and step telemetry, and a LiteLLM route to a scale-to-zero Runpod Serverless
+  Qwen generation worker. The graph allows at most one retrieval rewrite and one answer retry by
+  default; unsupported output is refused rather than returned.
 - Model access boundary: the local ingestion path now calls the separately deployed,
   OpenAI-compatible LiteLLM Gateway described in the
   [model-gateway decision](../architecture/model-gateway-decision.md). Ingestion uses the immutable
