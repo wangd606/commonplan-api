@@ -757,3 +757,42 @@ class HybridRetrievalSearchResponse(BaseModel):
     lexical_results: list[RetrievalHitRead]
     fused_results: list[HybridRetrievalHitRead]
     pipeline: RetrievalPipelineRead
+
+
+class GroundedAnswerRequest(HybridRetrievalSearchRequest):
+    max_citations: int = Field(default=6, ge=1, le=12)
+
+
+class GroundedClaimRead(BaseModel):
+    text: str
+    citation_ids: list[str]
+
+
+class AnswerCitationRead(BaseModel):
+    id: str
+    target: str
+    source_id: str
+    source_type: str
+    excerpt: str
+    heading_path: str | None
+    page_from: int | None
+    page_to: int | None
+
+
+class AnswerGenerationRead(BaseModel):
+    provider: str
+    model: str
+    status: Literal["answered", "evidence_only", "insufficient_evidence"]
+    grounding_status: Literal["citation_validated", "not_generated"]
+    grounded: bool
+    insufficient_evidence: bool
+    timings_ms: dict[str, float]
+
+
+class GroundedAnswerResponse(BaseModel):
+    query: str
+    answer: str | None
+    claims: list[GroundedClaimRead]
+    citations: list[AnswerCitationRead]
+    generation: AnswerGenerationRead
+    retrieval: HybridRetrievalSearchResponse

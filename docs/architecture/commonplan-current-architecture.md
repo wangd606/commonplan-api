@@ -8,8 +8,10 @@ storage, a transactional outbox captured from PostgreSQL WAL by Debezium, a Kafk
 Redpanda event backbone, database and document knowledge ingestion, Docling parsing, a private
 LiteLLM Gateway backed by Qwen/TEI, canonical pgvector rows, and authenticated retrieval endpoints.
 R1 returns ACL-filtered vector and lexical candidates; stacked R2 adds RRF, authorized context
-expansion, explainable local reranking, and a Web Retrieval Lab. It still has no neural reranker,
-citation assembler, generation model, Agentic RAG workflow, or registered MCP tool. An optional empty
+expansion and explainable local reranking. R3 adds bounded citation assembly, structured grounded
+claims, an explicit local-extractive/model-gateway provider boundary, and a Web Retrieval Lab that
+opens the exact evidence behind every claim. It still has no neural reranker, configured local
+generation runtime, Agentic RAG workflow, or registered MCP tool. An optional empty
 LiteLLM MCP gateway profile now makes the future tool boundary independently deployable without
 claiming any tool integration is complete.
 
@@ -23,7 +25,7 @@ claiming any tool integration is complete.
 | Debezium CDC | Independent Kafka Connect process. Reads committed inserts from the append-only outbox through PostgreSQL `pgoutput`; it never queries product tables. |
 | Redpanda | Kafka-compatible durable event broker. Owns topics, consumer-group offsets, replay and the dead-letter stream. Local development uses one node; production can use any Kafka-compatible managed provider. |
 | Ingestion Worker | Separate Kafka consumer process. Loads authoritative attachments, Issues, Comments, Projects and Project Updates through repositories; renders/parses, chunks, embeds and persists idempotently. |
-| LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates the worker and maps `commonplan-embedding-v1` to the pinned physical embedding profile. |
+| LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates model clients and maps `commonplan-embedding-v1` to the pinned physical embedding profile. R3 can call an explicitly registered `commonplan-generation-v1`; the local default remains extractive because no generation runtime is registered. |
 | LiteLLM MCP Tool Gateway | Optional Compose profile on port 4001. Separate config and credential; currently an empty registry with no upstream MCP server or application consumer. |
 | Qwen/TEI embedding runtime | Private local model service. Serves the pinned `Qwen/Qwen3-Embedding-0.6B` revision and returns normalized 1,024-dimensional vectors. |
 | PostgreSQL server | One local `db` container hosts the independently owned `zhitong` and `zhitong_auth` databases. Production may place them on separate physical servers without changing ownership. |
@@ -81,10 +83,11 @@ worker's repository—not either model component—writes pgvector rows.
 The offline ingestion foundation includes attachments and high-context database records, but it deliberately stops before search. There is no
 R1 includes HNSW/full-text/trigram indexes, same-profile query embedding, and an ACL-filtered
 candidate search endpoint. R2 adds RRF fusion, parent/neighbor expansion, and deterministic local
-reranking. It does not yet include a neural reranker, citation assembly, or an answer-generation model. LiteLLM is implemented locally for the embedding
-path; production gateway PostgreSQL/virtual keys, budgets, and multi-replica governance remain a
-deployment follow-up. Any future diagram must continue to distinguish implemented ingestion from
-proposed online retrieval and generation.
+reranking. R3 assembles bounded evidence only from those authorized results, validates claim-level
+citations and returns either deterministic extractive claims or a structured answer from an explicitly
+configured LiteLLM alias. No neural reranker or generation runtime is bundled locally. Production
+gateway PostgreSQL/virtual keys, budgets, multi-replica governance and R4 orchestration remain
+follow-up work.
 
 The optional `tool-gateway` is scaffolding only. It proves that the MCP security plane can run as a
 separate deployment, but it does not yet hold user OAuth tokens, expose application-approved tools,

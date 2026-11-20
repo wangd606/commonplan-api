@@ -5,10 +5,19 @@ from typing import Annotated, Literal
 import httpx
 from fastapi import Depends
 
+from app.config import settings
 from app.ingestion.embedding_profiles import embedding_profile_key
 from app.ingestion.embeddings import EmbeddingProvider, create_embedding_provider
 from app.models import User
 from app.repositories.retrieval_repository import RetrievalRepository, RetrievalRepositoryDep
+from app.retrieval.answering import (
+    AnswerGenerationError,
+    GroundedAnswerProvider,
+    assemble_citations,
+    create_answer_provider,
+    render_answer,
+    validate_draft,
+)
 from app.retrieval.fusion import deterministic_rerank, reciprocal_rank_fusion
 from app.retrieval.types import RetrievalScope, SearchHit
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
@@ -34,10 +43,12 @@ class RetrievalService:
         repository: RetrievalRepository,
         workspaces: WorkspaceService,
         embedding_provider: EmbeddingProvider,
+        answer_provider: GroundedAnswerProvider | None = None,
     ):
         self.repository = repository
         self.workspaces = workspaces
         self.embedding_provider = embedding_provider
+        self.answer_provider = answer_provider
 
     def search(
         self,
@@ -160,6 +171,89 @@ class RetrievalService:
             include_parent,
         )
 
+    def answer(
+        self,
+        user: User,
+        workspace_id: str,
+        *,
+        query: str,
+        team_ids: list[str] | None,
+        project_id: str | None,
+        issue_id: str | None,
+        limit: int,
+        candidate_limit: int,
+        neighbor_window: int,
+        include_parent: bool,
+        max_citations: int,
+    ) -> dict:
+        if self.answer_provider is None:
+            raise RetrievalUnavailable("Answer generation is not configured")
+        retrieval_started = perf_counter()
+        retrieval = self.hybrid_search(
+            user,
+            workspace_id,
+            query=query,
+            team_ids=team_ids,
+            project_id=project_id,
+            issue_id=issue_id,
+            limit=limit,
+            candidate_limit=candidate_limit,
+            neighbor_window=neighbor_window,
+            include_parent=include_parent,
+        )
+        retrieval_ms = (perf_counter() - retrieval_started) * 1000
+        citations = assemble_citations(
+            retrieval["fused_results"],
+            limit=min(max_citations, settings.rag_max_citations),
+        )
+        generation_started = perf_counter()
+        if self.answer_provider.output_mode == "evidence_only":
+            draft = self.answer_provider.generate(query, citations)
+        else:
+            try:
+                draft = self.answer_provider.generate(query, citations)
+                draft = validate_draft(
+                    draft,
+                    citations,
+                    max_claims=settings.rag_max_claims,
+                )
+            except (httpx.HTTPError, ValueError, AnswerGenerationError) as exc:
+                raise RetrievalUnavailable("Grounded answer generation is unavailable") from exc
+        generation_ms = (perf_counter() - generation_started) * 1000
+        evidence_only = self.answer_provider.output_mode == "evidence_only" and bool(citations)
+        insufficient = not citations or (
+            self.answer_provider.output_mode == "answer" and not draft.claims
+        )
+        status = "evidence_only" if evidence_only else (
+            "insufficient_evidence" if insufficient else "answered"
+        )
+        rendered = render_answer(draft) if draft.claims else None
+        return {
+            "query": query,
+            "answer": rendered,
+            "claims": [
+                {"text": claim.text, "citation_ids": list(claim.citation_ids)}
+                for claim in draft.claims
+            ],
+            "citations": [asdict(citation) for citation in citations],
+            "generation": {
+                "provider": self.answer_provider.provider,
+                "model": self.answer_provider.model,
+                "status": status,
+                "grounding_status": (
+                    "citation_validated" if draft.claims else "not_generated"
+                ),
+                "grounded": bool(draft.claims),
+                "insufficient_evidence": insufficient,
+                "timings_ms": {
+                    "retrieval": round(retrieval_ms, 2),
+                    "generation": round(generation_ms, 2),
+                    "total": round(retrieval_ms + generation_ms, 2),
+                },
+            },
+            "retrieval": retrieval,
+        }
+
     def _scope(
         self,
         user: User,
@@ -266,12 +360,23 @@ QueryEmbeddingProviderDep = Annotated[
 ]
 
 
+def get_grounded_answer_provider() -> GroundedAnswerProvider:
+    return create_answer_provider()
+
+
+GroundedAnswerProviderDep = Annotated[
+    GroundedAnswerProvider,
+    Depends(get_grounded_answer_provider),
+]
+
+
 def get_retrieval_service(
     repository: RetrievalRepositoryDep,
     workspaces: WorkspaceServiceDep,
     embedding_provider: QueryEmbeddingProviderDep,
+    answer_provider: GroundedAnswerProviderDep,
 ) -> RetrievalService:
-    return RetrievalService(repository, workspaces, embedding_provider)
+    return RetrievalService(repository, workspaces, embedding_provider, answer_provider)
 
 
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
