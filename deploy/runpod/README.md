@@ -8,13 +8,15 @@ The Business API never receives the Runpod credential and the browser never call
 Create the endpoint from Runpod's maintained vLLM worker:
 
 - model: `Qwen/Qwen3-14B-AWQ`;
-- GPU priority: RTX 4090 PRO, then the 24 GB standard pool;
-- active workers: `0`;
+- GPU pool: `AMPERE_24` (24 GB; Runpod can schedule an A5000, L4, or equivalent pool member);
+- minimum workers: `0`;
 - max workers: `1` for development;
 - GPUs per worker: `1`;
 - idle timeout: `30` seconds;
-- autoscaling: request count, scaler value `1`;
+- autoscaling: queue delay, scaler value `4`;
 - FlashBoot: enabled;
+- execution timeout: `600000` ms;
+- CUDA constraint: minimum `13.0` (not an exact-version allowlist);
 - environment: copy the non-secret values from `endpoint.env.example`.
 
 Runpod returns an endpoint ID. Its OpenAI-compatible base URL is:
