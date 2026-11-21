@@ -95,7 +95,7 @@ constraint, or if Bifrost-only routing/governance capabilities become a requirem
 | Alias | Consumer | Routing rule |
 | --- | --- | --- |
 | `commonplan-embedding-v1` | Ingestion Worker and AI/RAG query embedding | Pinned Qwen model, immutable revision and 1024 dimensions |
-| `commonplan-generation-v1` | R3 grounded-answer provider | Optional approved generation deployments; every returned claim is revalidated against request-local citation IDs |
+| `commonplan-generation-v1` | R3/R4 grounded-answer and agentic workflows | Runpod Serverless Qwen in the R4 deployment profile; every returned claim is revalidated against request-local citation IDs and the R4 grader |
 | `commonplan-rerank-v1` | AI/RAG candidate reranking | Future explicit reranker profile; never inferred from the generation alias |
 
 The alias is a product contract, not permission to change vector space. `commonplan-embedding-v1` may
@@ -137,9 +137,14 @@ regression suite.
    structured claims, treats retrieved evidence as untrusted prompt data, and rejects uncited or
    unknown citations. Register an actual generation deployment only with quality, timeout,
    error-mapping, cost and privacy tests. Enable retries and fallbacks per alias rather than globally.
-5. Before final production selection, run the same conformance and load suite against Bifrost. A switch
+5. **R4 orchestration and route implemented:** LangGraph bounds evidence grading, one query rewrite,
+   cited generation, answer grading and one answer retry. The optional Runpod profile routes
+   `commonplan-generation-v1` to `Qwen/Qwen3-14B-AWQ` through LiteLLM. Account endpoint creation,
+   secret injection, cold/warm latency measurement, quality evaluation and spend limits remain
+   deployment gates.
+6. Before final production selection, run the same conformance and load suite against Bifrost. A switch
    changes deployment/configuration, not the service-facing API.
-6. **Implemented as deployable scaffolding:** keep a separate optional LiteLLM `tool-gateway` process
+7. **Implemented as deployable scaffolding:** keep a separate optional LiteLLM `tool-gateway` process
    with an empty MCP registry. Add each upstream only after its auth/authorization and tool policy are
    reviewed; do not populate the registry merely to demonstrate connectivity.
 

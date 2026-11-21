@@ -18,6 +18,11 @@ from app.retrieval.answering import (
     render_answer,
     validate_draft,
 )
+from app.retrieval.agentic import (
+    AgenticAnswerModel,
+    ModelGatewayAgenticAnswerModel,
+    run_agentic_answer,
+)
 from app.retrieval.fusion import deterministic_rerank, reciprocal_rank_fusion
 from app.retrieval.types import RetrievalScope, SearchHit
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
@@ -44,11 +49,13 @@ class RetrievalService:
         workspaces: WorkspaceService,
         embedding_provider: EmbeddingProvider,
         answer_provider: GroundedAnswerProvider | None = None,
+        agentic_model: AgenticAnswerModel | None = None,
     ):
         self.repository = repository
         self.workspaces = workspaces
         self.embedding_provider = embedding_provider
         self.answer_provider = answer_provider
+        self.agentic_model = agentic_model
 
     def search(
         self,
@@ -188,6 +195,20 @@ class RetrievalService:
     ) -> dict:
         if self.answer_provider is None:
             raise RetrievalUnavailable("Answer generation is not configured")
+        if settings.rag_answer_strategy == "agentic":
+            return self._agentic_answer(
+                user,
+                workspace_id,
+                query=query,
+                team_ids=team_ids,
+                project_id=project_id,
+                issue_id=issue_id,
+                limit=limit,
+                candidate_limit=candidate_limit,
+                neighbor_window=neighbor_window,
+                include_parent=include_parent,
+                max_citations=max_citations,
+            )
         retrieval_started = perf_counter()
         retrieval = self.hybrid_search(
             user,
@@ -252,6 +273,97 @@ class RetrievalService:
                 },
             },
             "retrieval": retrieval,
+            "agent": None,
+        }
+
+    def _agentic_answer(
+        self,
+        user: User,
+        workspace_id: str,
+        *,
+        query: str,
+        team_ids: list[str] | None,
+        project_id: str | None,
+        issue_id: str | None,
+        limit: int,
+        candidate_limit: int,
+        neighbor_window: int,
+        include_parent: bool,
+        max_citations: int,
+    ) -> dict:
+        if self.agentic_model is None:
+            raise RetrievalUnavailable("Agentic answer generation is not configured")
+
+        started = perf_counter()
+
+        def retrieve(candidate_query: str) -> dict:
+            return self.hybrid_search(
+                user,
+                workspace_id,
+                query=candidate_query,
+                team_ids=team_ids,
+                project_id=project_id,
+                issue_id=issue_id,
+                limit=limit,
+                candidate_limit=candidate_limit,
+                neighbor_window=neighbor_window,
+                include_parent=include_parent,
+            )
+
+        try:
+            result = run_agentic_answer(
+                query=query,
+                retrieve=retrieve,
+                model=self.agentic_model,
+                max_citations=min(max_citations, settings.rag_max_citations),
+                max_claims=settings.rag_max_claims,
+                max_query_rewrites=settings.rag_max_query_rewrites,
+                max_answer_retries=settings.rag_max_answer_retries,
+            )
+        except (httpx.HTTPError, ValueError, AnswerGenerationError) as exc:
+            raise RetrievalUnavailable("Agentic answer generation is unavailable") from exc
+
+        total_ms = (perf_counter() - started) * 1000
+        retrieval_ms = result.retrieval_ms
+        prompt_tokens = sum(item.prompt_tokens for item in result.usage)
+        completion_tokens = sum(item.completion_tokens for item in result.usage)
+        total_tokens = sum(item.total_tokens for item in result.usage)
+        supported = result.answer_supported and bool(result.draft.claims)
+        return {
+            "query": query,
+            "answer": render_answer(result.draft) if supported else None,
+            "claims": [
+                {"text": claim.text, "citation_ids": list(claim.citation_ids)}
+                for claim in result.draft.claims
+            ] if supported else [],
+            "citations": [asdict(citation) for citation in result.citations],
+            "generation": {
+                "provider": self.agentic_model.provider,
+                "model": self.agentic_model.model,
+                "status": "answered" if supported else "insufficient_evidence",
+                "grounding_status": "agent_validated" if supported else "not_generated",
+                "grounded": supported,
+                "insufficient_evidence": not supported,
+                "timings_ms": {
+                    "retrieval": round(retrieval_ms, 2),
+                    "generation": round(max(0.0, total_ms - retrieval_ms), 2),
+                    "total": round(total_ms, 2),
+                },
+            },
+            "retrieval": result.retrieval,
+            "agent": {
+                "strategy": "bounded-langgraph-v1",
+                "final_query": result.final_query,
+                "rewrites": result.rewrites,
+                "answer_retries": result.answer_retries,
+                "model_calls": len(result.usage),
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                },
+                "steps": result.steps,
+            },
         }
 
     def _scope(
@@ -370,13 +482,33 @@ GroundedAnswerProviderDep = Annotated[
 ]
 
 
+def get_agentic_answer_model() -> AgenticAnswerModel | None:
+    if settings.rag_answer_strategy != "agentic":
+        return None
+    return ModelGatewayAgenticAnswerModel(
+        settings.model_gateway_base_url,
+        settings.model_gateway_api_key,
+        settings.model_gateway_generation_alias,
+        timeout_seconds=settings.rag_generation_timeout_seconds,
+    )
+
+
+AgenticAnswerModelDep = Annotated[
+    AgenticAnswerModel | None,
+    Depends(get_agentic_answer_model),
+]
+
+
 def get_retrieval_service(
     repository: RetrievalRepositoryDep,
     workspaces: WorkspaceServiceDep,
     embedding_provider: QueryEmbeddingProviderDep,
     answer_provider: GroundedAnswerProviderDep,
+    agentic_model: AgenticAnswerModelDep,
 ) -> RetrievalService:
-    return RetrievalService(repository, workspaces, embedding_provider, answer_provider)
+    return RetrievalService(
+        repository, workspaces, embedding_provider, answer_provider, agentic_model,
+    )
 
 
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
