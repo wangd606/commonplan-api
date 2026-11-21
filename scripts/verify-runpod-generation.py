@@ -3,23 +3,19 @@ import json
 import os
 import sys
 from time import perf_counter
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+import httpx
 
 
 def request_json(url: str, api_key: str, payload: dict | None = None) -> dict:
-    body = None if payload is None else json.dumps(payload).encode()
-    request = Request(
-        url,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="GET" if payload is None else "POST",
-    )
-    with urlopen(request, timeout=240) as response:
-        return json.load(response)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(timeout=240) as client:
+        if payload is None:
+            response = client.get(url, headers=headers)
+        else:
+            response = client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
 
 
 def main() -> int:
@@ -47,7 +43,7 @@ def main() -> int:
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": "Return JSON only."},
-                {"role": "user", "content": "Return {\"status\":\"ok\"}."},
+                {"role": "user", "content": "Return {\"status\":\"ok\"}. /no_think"},
             ],
         },
     )
@@ -69,6 +65,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (HTTPError, URLError, TimeoutError, KeyError, ValueError) as exc:
+    except (httpx.HTTPError, TimeoutError, KeyError, ValueError) as exc:
         print(f"Runpod verification failed: {exc}", file=sys.stderr)
         raise SystemExit(1)
