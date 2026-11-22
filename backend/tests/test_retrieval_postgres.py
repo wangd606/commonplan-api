@@ -271,6 +271,7 @@ def test_postgres_search_rejects_other_teams_and_embedding_spaces():
 
             assert [hit.node_id for hit in vector_hits] == ["authorized-node"]
             assert [hit.node_id for hit in lexical_hits] == ["authorized-node"]
+            assert 0.0 <= lexical_hits[0].score <= 1.0
             assert vector_hits[0].citation_target == "project:retrieval-project"
             assert [row.passage_id for row in contexts["authorized-node"]] == [
                 "authorized-neighbor"

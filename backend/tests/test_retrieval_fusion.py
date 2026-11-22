@@ -1,4 +1,4 @@
-from app.retrieval.fusion import deterministic_rerank, reciprocal_rank_fusion
+from app.retrieval.fusion import postgres_lexical_rerank, reciprocal_rank_fusion
 from app.retrieval.types import ContextPassage, RetrievalScope, SearchHit
 
 
@@ -38,7 +38,7 @@ def test_rrf_rewards_evidence_from_both_channels_without_mixing_raw_scores():
     assert fused[0].lexical_score == 0.04
 
 
-def test_reranker_uses_expanded_context_and_bilingual_query_features():
+def test_reranker_uses_postgres_lexical_score_and_keeps_expanded_context():
     candidates = reciprocal_rank_fusion(
         [_hit("a", "vector", 0.9, "general project notes")],
         [_hit("b", "lexical", 0.8, "登录回调故障")],
@@ -51,8 +51,30 @@ def test_reranker_uses_expanded_context_and_bilingual_query_features():
         "b": [],
     }
 
-    reranked = deterministic_rerank("Google 登录回调失败", candidates, contexts)
+    reranked = postgres_lexical_rerank(candidates, contexts)
 
-    assert reranked[0].hit.node_id == "a"
-    assert reranked[0].rerank_score > reranked[1].rerank_score
-    assert reranked[0].context[0].relation == "parent_page"
+    assert reranked[0].hit.node_id == "b"
+    assert reranked[0].rerank_score == 0.8
+    vector_only = next(row for row in reranked if row.hit.node_id == "a")
+    assert vector_only.rerank_score == 0.0
+    assert vector_only.context[0].relation == "parent_page"
+
+
+def test_reranker_uses_lexical_score_to_break_equal_rrf_scores():
+    candidates = reciprocal_rank_fusion(
+        [
+            _hit("a", "vector", 0.9, "first vector result"),
+            _hit("b", "vector", 0.8, "second vector result"),
+        ],
+        [
+            _hit("b", "lexical", 0.8, "strong lexical result"),
+            _hit("a", "lexical", 0.2, "weak lexical result"),
+        ],
+    )
+
+    reranked = postgres_lexical_rerank(candidates, {})
+
+    assert candidates[0].rrf_score == candidates[1].rrf_score
+    assert [row.hit.node_id for row in reranked] == ["b", "a"]
+    assert reranked[0].rerank_score == 0.8
+    assert reranked[1].rerank_score == 0.2

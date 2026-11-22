@@ -23,7 +23,7 @@ from app.retrieval.agentic import (
     ModelGatewayAgenticAnswerModel,
     run_agentic_answer,
 )
-from app.retrieval.fusion import deterministic_rerank, reciprocal_rank_fusion
+from app.retrieval.fusion import postgres_lexical_rerank, reciprocal_rank_fusion
 from app.retrieval.types import RetrievalScope, SearchHit
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
 
@@ -157,7 +157,7 @@ class RetrievalService:
             ]
             for node_id, passages in contexts.items()
         }
-        reranked = deterministic_rerank(query, fused, bounded_contexts)[:limit]
+        reranked = postgres_lexical_rerank(fused, bounded_contexts)[:limit]
         expansion_ms = (perf_counter() - phase) * 1000
         timings = {
             "lexical": lexical_ms,
@@ -451,7 +451,7 @@ class RetrievalService:
             "fused_results": fused_results,
             "pipeline": {
                 "fusion": "rrf-k60",
-                "reranker": "deterministic-coverage-v1",
+                "reranker": "postgres-lexical-rank-v2",
                 "candidate_limit": candidate_limit,
                 "neighbor_window": neighbor_window,
                 "include_parent": include_parent,

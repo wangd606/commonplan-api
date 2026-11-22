@@ -223,7 +223,7 @@ def test_hybrid_search_fuses_channels_and_expands_context():
     assert len(result["fused_results"]) == 2
     assert result["fused_results"][0]["context"][0]["relation"] == "next"
     assert result["pipeline"]["fusion"] == "rrf-k60"
-    assert result["pipeline"]["reranker"] == "deterministic-coverage-v1"
+    assert result["pipeline"]["reranker"] == "postgres-lexical-rank-v2"
     serialized = HybridRetrievalSearchResponse.model_validate(result).model_dump()
     assert serialized["fused_results"][0]["citation_target"] == "issue:issue-1"
     assert repository.vector_calls[0][3] == 20

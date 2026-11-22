@@ -3,16 +3,40 @@
 R4 keeps retrieval authorization and database access inside the existing repository/service boundary.
 LangGraph coordinates a bounded online flow:
 
-```text
-authorized hybrid retrieval
-  -> evidence grade
-  -> optional query rewrite (maximum 1)
-  -> authorized retrieval again
-  -> cited answer generation
-  -> answer support grade
-  -> optional answer retry (maximum 1)
-  -> answer or insufficient-evidence refusal
+```mermaid
+flowchart TD
+    start([Start]) --> retrieve["Retrieve current query<br/>ACL-scoped vector + lexical + RRF + context"]
+    retrieve --> citations{"Any authorized citations?"}
+    citations -- No --> noEvidence["Local decision<br/>evidence insufficient"]
+    citations -- Yes --> gradeEvidence["Model call<br/>grade evidence"]
+    noEvidence --> evidenceRoute{"Evidence sufficient?"}
+    gradeEvidence --> evidenceRoute
+
+    evidenceRoute -- Yes --> generate["Model call<br/>generate cited claims"]
+    evidenceRoute -- No --> canRewrite{"rewrites < max_query_rewrites?"}
+    canRewrite -- Yes --> rewrite["Model call<br/>rewrite original query"]
+    rewrite --> retrieve
+    canRewrite -- No --> insufficient["Clear draft<br/>return insufficient evidence"]
+
+    generate --> validate["Local validation<br/>known citation IDs + claim limit"]
+    validate --> hasClaims{"Valid claims remain?"}
+    hasClaims -- Yes --> gradeAnswer["Model call<br/>grade answer support"]
+    hasClaims -- No --> unsupported["Local decision<br/>answer unsupported"]
+    gradeAnswer --> answerRoute{"Answer supported?"}
+    unsupported --> answerRoute
+
+    answerRoute -- Yes --> done([Return grounded answer])
+    answerRoute -- No --> canRetry{"answer_retries < max_answer_retries?"}
+    canRetry -- Yes --> retry["Increment retry<br/>keep grader feedback"]
+    retry --> generate
+    canRetry -- No --> insufficient
+    insufficient --> refused([Return refusal])
 ```
+
+With the current defaults (`max_query_rewrites = 1`, `max_answer_retries = 1`), the longest path
+makes two retrieval attempts and at most seven model calls: two evidence grades, one query rewrite,
+two answer generations, and two answer grades. Empty retrievals and structurally invalid drafts are
+rejected locally without spending another model call.
 
 The browser and Business API never receive a Runpod key. Business API calls the stable
 `commonplan-generation-v1` alias with its LiteLLM credential; LiteLLM alone calls the account-owned

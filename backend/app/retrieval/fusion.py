@@ -34,40 +34,18 @@ def reciprocal_rank_fusion(
     return sorted(candidates.values(), key=lambda row: (-row.rrf_score, row.hit.node_id))
 
 
-def _query_features(query: str) -> set[str]:
-    lowered = query.casefold()
-    words = {
-        "".join(character for character in token if character.isalnum() or character in "-_./")
-        for token in lowered.split()
-    }
-    words.discard("")
-    cjk = [character for character in lowered if "\u3400" <= character <= "\u9fff"]
-    words.update("".join(cjk[index:index + 2]) for index in range(max(0, len(cjk) - 1)))
-    return words
-
-
-def deterministic_rerank(
-    query: str,
+def postgres_lexical_rerank(
     candidates: list[_Candidate],
     contexts: dict[str, list[ContextPassage]],
 ) -> list[FusedHit]:
-    """Apply an explainable local relevance pass after RRF and context expansion."""
-    query_features = _query_features(query)
-    query_phrase = " ".join(query.casefold().split())
+    """Use PostgreSQL lexical relevance to refine RRF without mixing raw channels."""
     rows: list[FusedHit] = []
     for candidate in candidates:
         passages = contexts.get(candidate.hit.node_id, [])
-        searchable = " ".join(
-            [candidate.hit.content, *(passage.content for passage in passages)]
-        ).casefold()
-        matched = sum(feature in searchable for feature in query_features)
-        coverage = matched / max(1, len(query_features))
-        exact_phrase = bool(query_phrase and query_phrase in " ".join(searchable.split()))
-        dual_channel = candidate.vector_rank is not None and candidate.lexical_rank is not None
-        rerank_score = min(
-            1.0,
-            0.72 * coverage + 0.18 * float(exact_phrase) + 0.10 * float(dual_channel),
-        )
+        # lexical_score is produced by PostgreSQL as the greater of normalized
+        # ts_rank_cd cover-density rank and pg_trgm similarity. Vector-only hits
+        # have no lexical evidence and therefore receive no lexical boost.
+        rerank_score = min(1.0, max(0.0, candidate.lexical_score or 0.0))
         final_score = candidate.rrf_score * (1.0 + 0.25 * rerank_score)
         rows.append(FusedHit(
             hit=candidate.hit,
