@@ -157,3 +157,5 @@ def test_model_gateway_agent_uses_structured_untrusted_evidence_contract(monkeyp
     assert captured["url"] == "http://gateway/v1/chat/completions"
     assert captured["json"]["response_format"] == {"type": "json_object"}
     assert "untrusted data" in captured["json"]["messages"][0]["content"]
+    assert "Terse field values are sufficient" in captured["json"]["messages"][0]["content"]
+    assert captured["json"]["messages"][0]["content"].endswith("/no_think")

@@ -18,6 +18,12 @@ The browser and Business API never receive a Runpod key. Business API calls the 
 `commonplan-generation-v1` alias with its LiteLLM credential; LiteLLM alone calls the account-owned
 Runpod OpenAI-compatible endpoint.
 
+Every structured grade/rewrite/generation prompt uses Qwen3's `/no_think` switch. These nodes need
+bounded JSON, and allowing the model's default thinking mode can consume a small node token budget
+while leaving the final OpenAI `content` field null. This does not remove the graph's explicit
+evidence and answer-grading stages; it only prevents hidden chain-of-thought from replacing their
+machine-readable result.
+
 ## 1. Create the scale-to-zero endpoint
 
 Follow [`deploy/runpod/README.md`](../../deploy/runpod/README.md). Use the served model name
@@ -36,6 +42,7 @@ RAG_ANSWER_PROVIDER=model_gateway
 RAG_ANSWER_STRATEGY=agentic
 RAG_MAX_QUERY_REWRITES=1
 RAG_MAX_ANSWER_RETRIES=1
+RAG_GENERATION_TIMEOUT_SECONDS=390
 ```
 
 Do not set `RUNPOD_API_KEY` in the Web repository or browser environment.
@@ -50,6 +57,12 @@ docker compose logs --tail=100 model-gateway backend
 
 The verifier prints status, model, latency, and token counts, but never prints the secret. The first
 request may be cold; record cold and warm timings separately.
+
+The timeout chain is deliberately ordered: LiteLLM waits up to 360 seconds for a scale-to-zero
+provider request, Business API waits up to 390 seconds for LiteLLM, and Retrieval Lab waits up to
+420 seconds for the complete bounded graph. This prevents a three-minute Runpod cold start from
+finishing after an inner caller has already returned `503`. These longer budgets are a synchronous
+R4 testing compromise; an asynchronous job/streaming UX remains production follow-up work.
 
 ## 4. Verify through CommonPlan
 

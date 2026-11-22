@@ -16,8 +16,11 @@ model_list:
       model: openai/commonplan-qwen
       api_base: os.environ/RUNPOD_OPENAI_BASE_URL
       api_key: os.environ/RUNPOD_API_KEY
-      timeout: 180
-      stream_timeout: 180
+      # The first request after scale-to-zero includes Runpod worker startup,
+      # model loading, and vLLM warmup. Keep the provider budget below the API
+      # budget but above the observed cold-start envelope.
+      timeout: 360
+      stream_timeout: 360
     model_info:
       mode: chat
       base_model: Qwen/Qwen3-14B-AWQ
@@ -28,7 +31,7 @@ general_settings:
 litellm_settings:
   drop_params: true
   turn_off_message_logging: true
-  request_timeout: 180
+  request_timeout: 360
 
 router_settings:
   # One bounded retry handles transient worker startup failures without hiding a

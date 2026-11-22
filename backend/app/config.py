@@ -70,7 +70,10 @@ class Settings(BaseSettings):
     model_gateway_generation_alias: str = "commonplan-generation-v1"
     rag_answer_provider: Literal["extractive", "model_gateway"] = "extractive"
     rag_answer_strategy: Literal["single_pass", "agentic"] = "single_pass"
-    rag_generation_timeout_seconds: float = 90
+    # Runpod scale-to-zero workers can spend several minutes loading model
+    # weights before the first request reaches vLLM. Keep this longer than the
+    # gateway provider timeout so the API can return the actual provider result.
+    rag_generation_timeout_seconds: float = 390
     rag_max_citations: int = 6
     rag_max_claims: int = 5
     rag_max_query_rewrites: int = 1
