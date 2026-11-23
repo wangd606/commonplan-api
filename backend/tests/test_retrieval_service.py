@@ -13,7 +13,7 @@ from app.retrieval.answering import (
     ExtractiveGroundedAnswerProvider,
     GroundedClaim,
 )
-from app.retrieval.agentic import AnswerGrade, EvidenceGrade, ModelUsage
+from app.retrieval.agentic import AnswerGrade, EvidenceGrade, ModelUsage, QueryPlan
 from app.retrieval.types import ContextPassage, RetrievalScope, SearchHit
 from app.schemas import (
     GroundedAnswerResponse,
@@ -69,6 +69,12 @@ class FakeAgenticModel:
     provider = "model_gateway"
     model = "commonplan-generation-v1"
 
+    def plan_query(self, query, available_tools, feedback, prior_evidence):
+        return QueryPlan((query,), ("internal_knowledge",), "direct lookup"), ModelUsage(4, 1, 5)
+
+    def rerank_evidence(self, query, citations, limit):
+        return [item.id for item in citations[:limit]], ModelUsage(4, 1, 5)
+
     def grade_evidence(self, query, citations):
         return EvidenceGrade(True, "enough"), ModelUsage(10, 2, 12)
 
@@ -81,7 +87,7 @@ class FakeAgenticModel:
         ),)), ModelUsage(20, 5, 25)
 
     def grade_answer(self, query, citations, draft):
-        return AnswerGrade(True, "supported"), ModelUsage(12, 2, 14)
+        return AnswerGrade("supported", "supported"), ModelUsage(12, 2, 14)
 
 
 class FakeRepository:
@@ -306,12 +312,13 @@ def test_agentic_answer_exposes_bounded_trace_and_usage(monkeypatch):
 
     assert result["generation"]["status"] == "answered"
     assert result["generation"]["grounding_status"] == "agent_validated"
-    assert result["agent"]["strategy"] == "full-retrieval-langgraph-v2"
-    assert result["agent"]["model_calls"] == 3
-    assert result["agent"]["usage"]["total_tokens"] == 51
+    assert result["agent"]["strategy"] == "agentic-answer-langgraph-v3"
+    assert result["agent"]["model_calls"] == 5
+    assert result["agent"]["usage"]["total_tokens"] == 61
     assert [step["node"] for step in result["agent"]["steps"]] == [
-        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
-        "expand_context", "rerank_results", "assemble_citations",
+        "plan_query", "execute_tools", "lexical_retrieve", "embed_query",
+        "vector_retrieve", "fuse_rrf", "expand_context", "rerank_results",
+        "merge_evidence", "rerank_evidence",
         "grade_evidence", "generate_answer", "grade_answer",
     ]
     GroundedAnswerResponse.model_validate(result)

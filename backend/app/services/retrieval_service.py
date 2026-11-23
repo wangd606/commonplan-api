@@ -301,7 +301,7 @@ class RetrievalService:
             },
             "retrieval": result.retrieval,
             "agent": {
-                "strategy": "full-retrieval-langgraph-v2",
+                "strategy": "agentic-answer-langgraph-v3",
                 "final_query": result.final_query,
                 "rewrites": result.rewrites,
                 "answer_retries": result.answer_retries,

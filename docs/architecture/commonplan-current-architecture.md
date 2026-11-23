@@ -30,6 +30,16 @@ claiming any tool integration is complete.
 | Ingestion Worker | Separate Kafka consumer process. Loads authoritative attachments, Issues, Comments, Projects and Project Updates through repositories; renders/parses, chunks, embeds and persists idempotently. |
 | LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates model clients and maps `commonplan-embedding-v1` to the pinned physical embedding profile. With the R4 Runpod configuration selected, `commonplan-generation-v1` maps to the account-owned Runpod endpoint without exposing its key to the API or browser. |
 | Retrieval + agentic answer workflow | Runs inside Business API for R4. After API authentication and scope derivation, LangGraph explicitly coordinates PostgreSQL lexical retrieval, query embedding, pgvector retrieval, RRF, repository context expansion, PostgreSQL-score reranking, citation assembly, evidence grading, at most one query rewrite, cited generation, answer grading, and at most one retry. It owns orchestration, not database access or model credentials. |
+
+### R5 AnswerGraph boundary
+
+R5 retains the same deployables and database ownership. Inside Business API, a top-level
+`AnswerGraph` now plans up to three retrieval queries and invokes evidence sources through an
+allow-listed `ToolRegistry`. The only registered implementation is `InternalKnowledgeTool`, which
+runs the existing RetrievalGraph. Results are normalized as tool evidence, deduplicated, model
+reranked, graded, and used for cited generation. An answer problem retries generation; an evidence
+problem returns to planning and retrieval. This interface supports later MCP, web, or product-API
+adapters without claiming that any of those tools are currently implemented.
 | Runpod Qwen generation runtime | Optional external Serverless vLLM deployment for `Qwen/Qwen3-14B-AWQ`. Scales to zero in development and is reached only by LiteLLM. No endpoint/key is stored in Git. |
 | LiteLLM MCP Tool Gateway | Optional Compose profile on port 4001. Separate config and credential; currently an empty registry with no upstream MCP server or application consumer. |
 | Qwen/TEI embedding runtime | Private local model service. Serves the pinned `Qwen/Qwen3-Embedding-0.6B` revision and returns normalized 1,024-dimensional vectors. |

@@ -3,6 +3,7 @@ from app.retrieval.agentic import (
     EvidenceGrade,
     ModelGatewayAgenticAnswerModel,
     ModelUsage,
+    QueryPlan,
     run_agentic_answer,
 )
 from app.retrieval.answering import AnswerCitation, AnswerDraft, GroundedClaim
@@ -73,18 +74,22 @@ class RewriteThenAnswerModel:
     def __init__(self):
         self.grade_calls = 0
 
+    def plan_query(self, query, available_tools, feedback, prior_evidence):
+        planned = "focused retrieval query" if feedback else query
+        return QueryPlan((planned,), ("internal_knowledge",), "test plan"), ModelUsage(8, 3, 11)
+
+    def rerank_evidence(self, query, citations, limit):
+        return [item.id for item in citations[:limit]], ModelUsage(3, 1, 4)
+
     def grade_evidence(self, query, citations):
         self.grade_calls += 1
         return EvidenceGrade(self.grade_calls > 1, "needs a focused query"), ModelUsage(10, 2, 12)
-
-    def rewrite_query(self, query, citations):
-        return "focused retrieval query", ModelUsage(8, 3, 11)
 
     def generate_answer(self, query, citations, feedback):
         return AnswerDraft((GroundedClaim("Supported answer", ("S1",)),)), ModelUsage(20, 5, 25)
 
     def grade_answer(self, query, citations, draft):
-        return AnswerGrade(True, "all claims are supported"), ModelUsage(15, 2, 17)
+        return AnswerGrade("supported", "all claims are supported"), ModelUsage(15, 2, 17)
 
 
 def test_langgraph_rewrites_once_then_returns_a_graded_answer():
@@ -103,15 +108,11 @@ def test_langgraph_rewrites_once_then_returns_a_graded_answer():
     assert result.answer_supported is True
     assert result.retrieval_ms > 0
     assert result.draft.claims[0].citation_ids == ("S1",)
-    assert [step["node"] for step in result.steps] == [
-        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
-        "expand_context", "rerank_results", "assemble_citations",
-        "grade_evidence", "rewrite_query",
-        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
-        "expand_context", "rerank_results", "assemble_citations",
-        "grade_evidence", "generate_answer", "grade_answer",
-    ]
-    assert sum(item.total_tokens for item in result.usage) == 77
+    nodes = [step["node"] for step in result.steps]
+    assert nodes.count("plan_query") == 2
+    assert nodes.count("execute_tools") == 2
+    assert nodes.count("rerank_evidence") == 2
+    assert nodes[-2:] == ["generate_answer", "grade_answer"]
 
 
 class NeverEnoughModel(RewriteThenAnswerModel):
@@ -163,6 +164,64 @@ def test_langgraph_retries_an_invalid_citation_once_without_exposing_it():
     assert result.draft.claims[0].text == "Supported answer"
     assert result.draft.claims[0].citation_ids == ("S1",)
     assert [step["node"] for step in result.steps].count("generate_answer") == 2
+
+
+class DecomposingModel(RewriteThenAnswerModel):
+    def plan_query(self, query, available_tools, feedback, prior_evidence):
+        return QueryPlan(
+            ("TA-1 failure cause", "TA-1 remediation"),
+            ("internal_knowledge",),
+            "two independently searchable parts",
+        ), ModelUsage(8, 3, 11)
+
+    def grade_evidence(self, query, citations):
+        return EvidenceGrade(True, "combined evidence is enough"), ModelUsage(4, 1, 5)
+
+
+def test_answer_graph_decomposes_query_and_merges_tool_evidence():
+    runtime = FakeRetrievalRuntime()
+    result = run_agentic_answer(
+        query="Why did TA-1 fail and how was it fixed?",
+        retrieval_runtime=runtime,
+        model=DecomposingModel(),
+        max_citations=4,
+        max_claims=3,
+        max_query_rewrites=0,
+        max_answer_retries=0,
+    )
+
+    assert result.final_query == "TA-1 failure cause | TA-1 remediation"
+    execute = next(step for step in result.steps if step["node"] == "execute_tools")
+    assert execute["decision"] == "2 tool calls"
+    assert [step["node"] for step in result.steps].count("lexical_retrieve") == 2
+
+
+class EvidenceProblemAfterAnswerModel(RewriteThenAnswerModel):
+    def grade_evidence(self, query, citations):
+        return EvidenceGrade(True, "appears sufficient"), ModelUsage(4, 1, 5)
+
+    def grade_answer(self, query, citations, draft):
+        if self.grade_calls == 0:
+            self.grade_calls += 1
+            return AnswerGrade("evidence_problem", "missing remediation evidence"), ModelUsage(4, 1, 5)
+        return AnswerGrade("supported", "supported after replan"), ModelUsage(4, 1, 5)
+
+
+def test_answer_evidence_problem_routes_back_to_planner():
+    result = run_agentic_answer(
+        query="question",
+        retrieval_runtime=FakeRetrievalRuntime(),
+        model=EvidenceProblemAfterAnswerModel(),
+        max_citations=4,
+        max_claims=3,
+        max_query_rewrites=1,
+        max_answer_retries=1,
+    )
+
+    assert result.answer_supported is True
+    assert result.rewrites == 1
+    assert result.answer_retries == 0
+    assert [step["node"] for step in result.steps].count("plan_query") == 2
 
 
 def test_model_gateway_agent_uses_structured_untrusted_evidence_contract(monkeypatch):

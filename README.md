@@ -81,5 +81,10 @@ retrieval, query embedding, vector retrieval, RRF, context expansion, reranking 
 into explicit LangGraph nodes, then grades evidence, performs at most one query rewrite, generates
 cited claims, and performs at most one answer retry. The generation alias is ready to route through LiteLLM to a
 Runpod Serverless Qwen worker; no Runpod credential or model endpoint is committed to the repository.
-See the [R4 verification guide](docs/implementation/retrieval-r4-runpod-verification.md). Neural
+R5 wraps that RetrievalGraph in a top-level AnswerGraph with bounded planning, a retrieval-tool
+registry, multi-query decomposition, model reranking, evidence grading, grounded generation, and
+three-way answer grading. The proof of concept registers only the internal knowledge tool while
+preserving the adapter boundary for future MCP, web, or product-API tools. See the
+[R5 verification guide](docs/implementation/retrieval-r5-agentic-graph-verification.md) and the
+[R4 verification guide](docs/implementation/retrieval-r4-runpod-verification.md). Neural
 reranking and production gateway virtual keys/persistence remain later deployment work.

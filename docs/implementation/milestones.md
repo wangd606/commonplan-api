@@ -255,12 +255,12 @@ discovery or execution.
 
 ## M12 — RAG ingestion and retrieval
 
-**Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R4 are implemented: ACL-filtered
+**Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R5 are implemented: ACL-filtered
 channels, RRF fusion, parent/neighbor expansion, PostgreSQL lexical-score reranking, a bilingual
 evaluation contract, Retrieval Lab, bounded evidence assembly, claim-level grounded citations, and a
 full retrieval plus bounded-answer LangGraph workflow. The Runpod deployment configuration is code-complete; creating the
-account-owned endpoint and providing its secret remain deployment actions. Neural reranking remains
-pending.
+account-owned endpoint and providing its secret remain deployment actions. R5 adds model-based
+evidence reranking while production retrieval evaluation and tuning remain pending.
 
 Consume durable knowledge events asynchronously. Index both uploaded documents and contextual product records—issues, comments, projects, project objectives, milestones, and project updates—with workspace/team/resource ACL metadata. Extract supported documents, render database records deterministically, record parser/renderer/version/checksum, chunk content, generate embeddings, and store tombstones for deleted sources. Retrieval must apply authorization before returning chunks. Ingestion stays retryable and observable, and neither an upload nor a business mutation depends on model or vector-store availability.
 
@@ -276,7 +276,11 @@ Delivery is split into two reviewable vertical slices:
   LangGraph node and continues through bounded grade/rewrite/generate/grade branches, token and step
   telemetry, and a LiteLLM route to a scale-to-zero Runpod Serverless
   Qwen generation worker. The graph allows at most one retrieval rewrite and one answer retry by
-  default; unsupported output is refused rather than returned.
+  default; unsupported output is refused rather than returned. R5 wraps RetrievalGraph in a
+  top-level AnswerGraph with bounded planning and query decomposition, an allow-listed Tool Registry
+  whose only current adapter is internal knowledge, model evidence reranking, and separate
+  answer-problem versus evidence-problem recovery routes. External tool adapters remain deliberately
+  out of scope for the proof of concept.
 - Model access boundary: the local ingestion path now calls the separately deployed,
   OpenAI-compatible LiteLLM Gateway described in the
   [model-gateway decision](../architecture/model-gateway-decision.md). Ingestion uses the immutable
