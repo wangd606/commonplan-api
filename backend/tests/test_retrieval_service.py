@@ -5,10 +5,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 
 from app.main import app
+from app.config import settings
 from app.models import User
 from app.repositories.retrieval_repository import SqlAlchemyRetrievalRepository
+from app.retrieval.answering import (
+    AnswerDraft,
+    ExtractiveGroundedAnswerProvider,
+    GroundedClaim,
+)
+from app.retrieval.agentic import AnswerGrade, EvidenceGrade, ModelUsage, QueryPlan
 from app.retrieval.types import ContextPassage, RetrievalScope, SearchHit
-from app.schemas import HybridRetrievalSearchResponse, RetrievalSearchResponse
+from app.schemas import (
+    GroundedAnswerResponse,
+    HybridRetrievalSearchResponse,
+    RetrievalSearchResponse,
+)
 from app.services.retrieval_service import RetrievalForbidden, RetrievalService
 
 
@@ -39,6 +50,44 @@ class FakeEmbeddingProvider:
     def embed(self, texts):
         self.calls.append(texts)
         return [[1.0, 0.0, 0.0] for _text in texts]
+
+
+class FakeAnswerProvider:
+    provider = "test"
+    model = "test-grounded-v1"
+    output_mode = "answer"
+
+    def generate(self, query, citations):
+        assert query == "Why did TA-1 fail?"
+        assert citations[0].target == "issue:issue-1"
+        return AnswerDraft((GroundedClaim(
+            "TA-1 failed after the ONNX runtime upgrade.", ("S1",),
+        ),))
+
+
+class FakeAgenticModel:
+    provider = "model_gateway"
+    model = "commonplan-generation-v1"
+
+    def plan_query(self, query, available_tools, feedback, prior_evidence):
+        return QueryPlan((query,), ("internal_knowledge",), "direct lookup"), ModelUsage(4, 1, 5)
+
+    def rerank_evidence(self, query, citations, limit):
+        return [item.id for item in citations[:limit]], ModelUsage(4, 1, 5)
+
+    def grade_evidence(self, query, citations):
+        return EvidenceGrade(True, "enough"), ModelUsage(10, 2, 12)
+
+    def rewrite_query(self, query, citations):
+        raise AssertionError("rewrite should not be called")
+
+    def generate_answer(self, query, citations, feedback):
+        return AnswerDraft((GroundedClaim(
+            "TA-1 failed after the ONNX runtime upgrade.", ("S1",),
+        ),)), ModelUsage(20, 5, 25)
+
+    def grade_answer(self, query, citations, draft):
+        return AnswerGrade("supported", "supported"), ModelUsage(12, 2, 14)
 
 
 class FakeRepository:
@@ -179,13 +228,100 @@ def test_hybrid_search_fuses_channels_and_expands_context():
     assert len(result["lexical_results"]) == 1
     assert len(result["fused_results"]) == 2
     assert result["fused_results"][0]["context"][0]["relation"] == "next"
+    assert result["pipeline"]["orchestrator"] == "langgraph-retrieval-v1"
     assert result["pipeline"]["fusion"] == "rrf-k60"
-    assert result["pipeline"]["reranker"] == "deterministic-coverage-v1"
+    assert result["pipeline"]["reranker"] == "postgres-lexical-rank-v2"
     serialized = HybridRetrievalSearchResponse.model_validate(result).model_dump()
     assert serialized["fused_results"][0]["citation_target"] == "issue:issue-1"
     assert repository.vector_calls[0][3] == 20
     assert repository.lexical_calls[0][2] == 20
     assert repository.context_calls[0][2:] == (1, True)
+
+
+def test_grounded_answer_uses_r2_evidence_and_exposes_structured_citations():
+    repository = FakeRepository()
+    service = RetrievalService(
+        repository,
+        FakeWorkspaces(["team-a"]),
+        FakeEmbeddingProvider(),
+        FakeAnswerProvider(),
+    )
+
+    result = service.answer(
+        user(), "workspace-1", query="Why did TA-1 fail?",
+        team_ids=None, project_id=None, issue_id=None, limit=5,
+        candidate_limit=20, neighbor_window=1, include_parent=True,
+        max_citations=6,
+    )
+
+    assert result["answer"].endswith("[S1]")
+    assert result["claims"] == [{
+        "text": "TA-1 failed after the ONNX runtime upgrade.",
+        "citation_ids": ["S1"],
+    }]
+    assert result["citations"][0]["target"] == "issue:issue-1"
+    assert result["generation"]["grounded"] is True
+    assert result["generation"]["status"] == "answered"
+    assert result["generation"]["grounding_status"] == "citation_validated"
+    assert result["retrieval"]["pipeline"]["fusion"] == "rrf-k60"
+    serialized = GroundedAnswerResponse.model_validate(result).model_dump()
+    assert serialized["citations"][0]["id"] == "S1"
+
+
+def test_extractive_mode_returns_evidence_without_presenting_it_as_an_answer():
+    service = RetrievalService(
+        FakeRepository(),
+        FakeWorkspaces(["team-a"]),
+        FakeEmbeddingProvider(),
+        ExtractiveGroundedAnswerProvider(),
+    )
+
+    result = service.answer(
+        user(), "workspace-1", query="An unrelated question",
+        team_ids=None, project_id=None, issue_id=None, limit=5,
+        candidate_limit=20, neighbor_window=1, include_parent=True,
+        max_citations=6,
+    )
+
+    assert result["answer"] is None
+    assert result["claims"] == []
+    assert result["citations"]
+    assert result["generation"]["status"] == "evidence_only"
+    assert result["generation"]["grounding_status"] == "not_generated"
+    assert result["generation"]["grounded"] is False
+    assert result["generation"]["insufficient_evidence"] is False
+    GroundedAnswerResponse.model_validate(result)
+
+
+def test_agentic_answer_exposes_bounded_trace_and_usage(monkeypatch):
+    monkeypatch.setattr(settings, "rag_answer_strategy", "agentic")
+    service = RetrievalService(
+        FakeRepository(),
+        FakeWorkspaces(["team-a"]),
+        FakeEmbeddingProvider(),
+        FakeAnswerProvider(),
+        FakeAgenticModel(),
+    )
+
+    result = service.answer(
+        user(), "workspace-1", query="Why did TA-1 fail?",
+        team_ids=None, project_id=None, issue_id=None, limit=5,
+        candidate_limit=20, neighbor_window=1, include_parent=True,
+        max_citations=6,
+    )
+
+    assert result["generation"]["status"] == "answered"
+    assert result["generation"]["grounding_status"] == "agent_validated"
+    assert result["agent"]["strategy"] == "agentic-answer-langgraph-v3"
+    assert result["agent"]["model_calls"] == 5
+    assert result["agent"]["usage"]["total_tokens"] == 61
+    assert [step["node"] for step in result["agent"]["steps"]] == [
+        "plan_query", "execute_tools", "lexical_retrieve", "embed_query",
+        "vector_retrieve", "fuse_rrf", "expand_context", "rerank_results",
+        "merge_evidence", "rerank_evidence",
+        "grade_evidence", "generate_answer", "grade_answer",
+    ]
+    GroundedAnswerResponse.model_validate(result)
 
 
 class EmptyRows:
@@ -257,6 +393,16 @@ def test_retrieval_route_is_fail_closed_without_access_token():
 def test_hybrid_retrieval_route_is_fail_closed_without_access_token():
     response = TestClient(app).post(
         "/api/v1/workspaces/workspace-1/retrieval/hybrid-search",
+        json={"query": "TA-1"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+
+
+def test_grounded_answer_route_is_fail_closed_without_access_token():
+    response = TestClient(app).post(
+        "/api/v1/workspaces/workspace-1/retrieval/answer",
         json={"query": "TA-1"},
     )
 

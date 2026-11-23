@@ -742,6 +742,7 @@ class HybridRetrievalHitRead(BaseModel):
 
 
 class RetrievalPipelineRead(BaseModel):
+    orchestrator: str = "langgraph-retrieval-v1"
     fusion: str
     reranker: str
     candidate_limit: int
@@ -757,3 +758,67 @@ class HybridRetrievalSearchResponse(BaseModel):
     lexical_results: list[RetrievalHitRead]
     fused_results: list[HybridRetrievalHitRead]
     pipeline: RetrievalPipelineRead
+
+
+class GroundedAnswerRequest(HybridRetrievalSearchRequest):
+    max_citations: int = Field(default=6, ge=1, le=12)
+
+
+class GroundedClaimRead(BaseModel):
+    text: str
+    citation_ids: list[str]
+
+
+class AnswerCitationRead(BaseModel):
+    id: str
+    target: str
+    source_id: str
+    source_type: str
+    excerpt: str
+    heading_path: str | None
+    page_from: int | None
+    page_to: int | None
+
+
+class AnswerGenerationRead(BaseModel):
+    provider: str
+    model: str
+    status: Literal["answered", "evidence_only", "insufficient_evidence"]
+    grounding_status: Literal["citation_validated", "agent_validated", "not_generated"]
+    grounded: bool
+    insufficient_evidence: bool
+    timings_ms: dict[str, float]
+
+
+class AgenticStepRead(BaseModel):
+    node: str
+    query: str
+    attempt: int
+    decision: str
+    detail: str | None = None
+
+
+class AgenticUsageRead(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class AgenticRunRead(BaseModel):
+    strategy: str
+    final_query: str
+    rewrites: int
+    answer_retries: int
+    model_calls: int
+    usage: AgenticUsageRead
+    steps: list[AgenticStepRead]
+
+
+class GroundedAnswerResponse(BaseModel):
+    query: str
+    answer: str | None
+    claims: list[GroundedClaimRead]
+    citations: list[AnswerCitationRead]
+    generation: AnswerGenerationRead
+    retrieval: HybridRetrievalSearchResponse
+    agent: AgenticRunRead | None = None

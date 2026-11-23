@@ -158,6 +158,14 @@ services:
       MODEL_GATEWAY_BASE_URL: ${MODEL_GATEWAY_BASE_URL:-http://model-gateway:4000/v1}
       MODEL_GATEWAY_API_KEY: ${MODEL_GATEWAY_API_KEY:-sk-local-commonplan-change-me}
       MODEL_GATEWAY_EMBEDDING_ALIAS: ${MODEL_GATEWAY_EMBEDDING_ALIAS:-commonplan-embedding-v1}
+      MODEL_GATEWAY_GENERATION_ALIAS: ${MODEL_GATEWAY_GENERATION_ALIAS:-commonplan-generation-v1}
+      RAG_ANSWER_PROVIDER: ${RAG_ANSWER_PROVIDER:-extractive}
+      RAG_ANSWER_STRATEGY: ${RAG_ANSWER_STRATEGY:-single_pass}
+      RAG_GENERATION_TIMEOUT_SECONDS: ${RAG_GENERATION_TIMEOUT_SECONDS:-390}
+      RAG_MAX_CITATIONS: ${RAG_MAX_CITATIONS:-6}
+      RAG_MAX_CLAIMS: ${RAG_MAX_CLAIMS:-5}
+      RAG_MAX_QUERY_REWRITES: ${RAG_MAX_QUERY_REWRITES:-1}
+      RAG_MAX_ANSWER_RETRIES: ${RAG_MAX_ANSWER_RETRIES:-1}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
@@ -307,10 +315,13 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-local-commonplan-change-me}
       TEI_OPENAI_BASE_URL: http://embedding-service/v1
       TEI_API_KEY: ${TEI_API_KEY:-not-required-local}
+      RUNPOD_OPENAI_BASE_URL: ${RUNPOD_OPENAI_BASE_URL:-}
+      RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+      RUNPOD_SERVED_MODEL_NAME: ${RUNPOD_SERVED_MODEL_NAME:-commonplan-qwen}
     ports:
       - "127.0.0.1:4000:4000"
     volumes:
-      - ./deploy/litellm/config.yaml:/app/config.yaml:ro
+      - ${MODEL_GATEWAY_CONFIG_PATH:-./deploy/litellm/config.yaml}:/app/config.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=5)"]
       interval: 10s

@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     model_gateway_base_url: str = "http://model-gateway:4000/v1"
     model_gateway_api_key: str = ""
     model_gateway_embedding_alias: str = "commonplan-embedding-v1"
+    model_gateway_generation_alias: str = "commonplan-generation-v1"
+    rag_answer_provider: Literal["extractive", "model_gateway"] = "extractive"
+    rag_answer_strategy: Literal["single_pass", "agentic"] = "single_pass"
+    # Runpod scale-to-zero workers can spend several minutes loading model
+    # weights before the first request reaches vLLM. Keep this longer than the
+    # gateway provider timeout so the API can return the actual provider result.
+    rag_generation_timeout_seconds: float = 390
+    rag_max_citations: int = 6
+    rag_max_claims: int = 5
+    rag_max_query_rewrites: int = 1
+    rag_max_answer_retries: int = 1
     openai_api_key: str = ""
 
     @model_validator(mode="after")
@@ -75,6 +86,12 @@ class Settings(BaseSettings):
             raise ValueError("SameSite=None cookies require COOKIE_SECURE=true")
         if self.ingestion_embedding_dimensions < 1:
             raise ValueError("INGESTION_EMBEDDING_DIMENSIONS must be positive")
+        if self.rag_max_citations < 1 or self.rag_max_claims < 1:
+            raise ValueError("RAG citation and claim limits must be positive")
+        if self.rag_max_query_rewrites < 0 or self.rag_max_answer_retries < 0:
+            raise ValueError("RAG retry limits cannot be negative")
+        if self.rag_answer_strategy == "agentic" and self.rag_answer_provider != "model_gateway":
+            raise ValueError("Agentic answers require RAG_ANSWER_PROVIDER=model_gateway")
         return self
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)

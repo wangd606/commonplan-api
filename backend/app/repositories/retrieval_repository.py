@@ -106,8 +106,12 @@ class SqlAlchemyRetrievalRepository:
     ) -> list[SearchHit]:
         document = func.to_tsvector("simple", KnowledgeNode.content)
         tsquery = func.plainto_tsquery("simple", query)
+        # Normalization 32 maps cover-density rank to rank / (rank + 1), keeping
+        # it on the same bounded 0..1 scale as pg_trgm similarity. The resulting
+        # database score can therefore be used by the fusion reranker without
+        # query-specific min/max normalization in the service layer.
         rank = func.greatest(
-            func.ts_rank_cd(document, tsquery),
+            func.ts_rank_cd(document, tsquery, 32),
             func.similarity(KnowledgeNode.content, query),
         )
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

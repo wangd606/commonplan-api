@@ -9,8 +9,10 @@ reranking pass. It does not generate an answer or run a LangGraph loop.
 1. PostgreSQL lexical search and pgvector search independently retrieve up to `candidate_limit` rows.
 2. Reciprocal Rank Fusion (`k=60`) combines ranks without comparing incompatible raw scores.
 3. The repository loads the authorized document page and adjacent chunks for each fused candidate.
-4. `deterministic-coverage-v1` reranks using query coverage, exact phrase evidence, and agreement
-   between both channels. This is transparent and local; it is not presented as a neural cross-encoder.
+4. `postgres-lexical-rank-v2` uses PostgreSQL's normalized `ts_rank_cd` cover-density rank (with
+   `pg_trgm` similarity as the bilingual/exact-substring fallback) to refine the RRF order. The
+   bounded 0–1 database score can boost an RRF result by at most 25%. This remains transparent and
+   local; it is not presented as BM25 or as a neural cross-encoder.
 5. The API returns the raw channels, final ranking, score evidence, expanded context, and timings.
 
 The endpoint is:

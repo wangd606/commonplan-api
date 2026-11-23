@@ -8,8 +8,13 @@ storage, a transactional outbox captured from PostgreSQL WAL by Debezium, a Kafk
 Redpanda event backbone, database and document knowledge ingestion, Docling parsing, a private
 LiteLLM Gateway backed by Qwen/TEI, canonical pgvector rows, and authenticated retrieval endpoints.
 R1 returns ACL-filtered vector and lexical candidates; stacked R2 adds RRF, authorized context
-expansion, explainable local reranking, and a Web Retrieval Lab. It still has no neural reranker,
-citation assembler, generation model, Agentic RAG workflow, or registered MCP tool. An optional empty
+expansion and explainable local reranking. R3 adds bounded citation assembly, structured grounded
+claims, an explicit local-extractive/model-gateway provider boundary, and a Web Retrieval Lab that
+opens the exact evidence behind every claim. R4 moves the complete online hybrid-retrieval sequence
+into explicit LangGraph nodes, then adds a bounded answer workflow and a LiteLLM route prepared for
+a scale-to-zero Runpod Serverless Qwen worker. The endpoint itself is an
+account-owned deployment and is not provisioned by this repository. The system still has no neural
+reranker or registered MCP tool. An optional empty
 LiteLLM MCP gateway profile now makes the future tool boundary independently deployable without
 claiming any tool integration is complete.
 
@@ -23,7 +28,19 @@ claiming any tool integration is complete.
 | Debezium CDC | Independent Kafka Connect process. Reads committed inserts from the append-only outbox through PostgreSQL `pgoutput`; it never queries product tables. |
 | Redpanda | Kafka-compatible durable event broker. Owns topics, consumer-group offsets, replay and the dead-letter stream. Local development uses one node; production can use any Kafka-compatible managed provider. |
 | Ingestion Worker | Separate Kafka consumer process. Loads authoritative attachments, Issues, Comments, Projects and Project Updates through repositories; renders/parses, chunks, embeds and persists idempotently. |
-| LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates the worker and maps `commonplan-embedding-v1` to the pinned physical embedding profile. |
+| LiteLLM Gateway | Private OpenAI-compatible service on port 4000. Authenticates model clients and maps `commonplan-embedding-v1` to the pinned physical embedding profile. With the R4 Runpod configuration selected, `commonplan-generation-v1` maps to the account-owned Runpod endpoint without exposing its key to the API or browser. |
+| Retrieval + agentic answer workflow | Runs inside Business API for R4. After API authentication and scope derivation, LangGraph explicitly coordinates PostgreSQL lexical retrieval, query embedding, pgvector retrieval, RRF, repository context expansion, PostgreSQL-score reranking, citation assembly, evidence grading, at most one query rewrite, cited generation, answer grading, and at most one retry. It owns orchestration, not database access or model credentials. |
+
+### R5 AnswerGraph boundary
+
+R5 retains the same deployables and database ownership. Inside Business API, a top-level
+`AnswerGraph` now plans up to three retrieval queries and invokes evidence sources through an
+allow-listed `ToolRegistry`. The only registered implementation is `InternalKnowledgeTool`, which
+runs the existing RetrievalGraph. Results are normalized as tool evidence, deduplicated, model
+reranked, graded, and used for cited generation. An answer problem retries generation; an evidence
+problem returns to planning and retrieval. This interface supports later MCP, web, or product-API
+adapters without claiming that any of those tools are currently implemented.
+| Runpod Qwen generation runtime | Optional external Serverless vLLM deployment for `Qwen/Qwen3-14B-AWQ`. Scales to zero in development and is reached only by LiteLLM. No endpoint/key is stored in Git. |
 | LiteLLM MCP Tool Gateway | Optional Compose profile on port 4001. Separate config and credential; currently an empty registry with no upstream MCP server or application consumer. |
 | Qwen/TEI embedding runtime | Private local model service. Serves the pinned `Qwen/Qwen3-Embedding-0.6B` revision and returns normalized 1,024-dimensional vectors. |
 | PostgreSQL server | One local `db` container hosts the independently owned `zhitong` and `zhitong_auth` databases. Production may place them on separate physical servers without changing ownership. |
@@ -63,6 +80,11 @@ Compose uses one physical PostgreSQL server with two databases and independent A
    deterministic Markdown renderer. Both paths chunk and embed through the same model alias. The
    worker commits the Kafka offset only after its repository transaction succeeds; exhausted events
    go to `commonplan.knowledge.dlq.v1`.
+10. In R4, Business API derives the authorized scope before entering LangGraph. The graph then runs
+    explicit lexical, embedding, vector, RRF, context-expansion, PostgreSQL-score reranking and
+    citation nodes. Agentic mode continues by grading evidence, optionally rewriting and repeating
+    those retrieval nodes once, then generating and grading cited claims. LiteLLM holds the Runpod
+    credential and forwards only model requests; unsupported answers return as insufficient evidence.
 
 LiteLLM and TEI are deliberately separate deployables. LiteLLM authenticates and routes the stable
 alias; TEI loads the pinned Qwen weights and performs inference. Vectors return to the worker, and the
@@ -81,10 +103,13 @@ worker's repository—not either model component—writes pgvector rows.
 The offline ingestion foundation includes attachments and high-context database records, but it deliberately stops before search. There is no
 R1 includes HNSW/full-text/trigram indexes, same-profile query embedding, and an ACL-filtered
 candidate search endpoint. R2 adds RRF fusion, parent/neighbor expansion, and deterministic local
-reranking. It does not yet include a neural reranker, citation assembly, or an answer-generation model. LiteLLM is implemented locally for the embedding
-path; production gateway PostgreSQL/virtual keys, budgets, and multi-replica governance remain a
-deployment follow-up. Any future diagram must continue to distinguish implemented ingestion from
-proposed online retrieval and generation.
+reranking. R3 assembles bounded evidence only from those authorized results, validates claim-level
+citations and returns either an evidence-only preview or a structured answer from an explicitly
+configured LiteLLM alias. R4 implements full retrieval plus bounded answer orchestration in
+LangGraph, together with the Runpod routing
+configuration. No generation runtime is bundled locally, and no remote endpoint is considered active
+until an operator supplies the ignored secret and verifies it. Neural reranking plus production
+gateway PostgreSQL/virtual keys, budgets, and multi-replica governance remain follow-up work.
 
 The optional `tool-gateway` is scaffolding only. It proves that the MCP security plane can run as a
 separate deployment, but it does not yet hold user OAuth tokens, expose application-approved tools,
