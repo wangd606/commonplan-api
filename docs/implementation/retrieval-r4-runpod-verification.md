@@ -1,12 +1,19 @@
 # Verify R4 Agentic RAG with Runpod
 
-R4 keeps retrieval authorization and database access inside the existing repository/service boundary.
-LangGraph coordinates a bounded online flow:
+R4 keeps authentication and scope derivation before the graph, and keeps database access inside
+repositories. Everything between the authorized scope and the final answer is coordinated by one
+LangGraph state machine; retrieval is no longer an opaque service callback inside the answer graph.
 
 ```mermaid
 flowchart TD
-    start([Start]) --> retrieve["Retrieve current query<br/>ACL-scoped vector + lexical + RRF + context"]
-    retrieve --> citations{"Any authorized citations?"}
+    start([Authorized scope + question]) --> lexical["PostgreSQL lexical retrieval<br/>ts_rank_cd + trigram"]
+    lexical --> embed["Query embedding<br/>Model Gateway"]
+    embed --> vector["pgvector retrieval<br/>same embedding profile + ACL"]
+    vector --> rrf["RRF fusion"]
+    rrf --> context["Repository context expansion<br/>parent page + neighbors"]
+    context --> rerank["PostgreSQL lexical rerank<br/>bounded boost over RRF"]
+    rerank --> assemble["Assemble bounded citations"]
+    assemble --> citations{"Any authorized citations?"}
     citations -- No --> noEvidence["Local decision<br/>evidence insufficient"]
     citations -- Yes --> gradeEvidence["Model call<br/>grade evidence"]
     noEvidence --> evidenceRoute{"Evidence sufficient?"}
@@ -15,7 +22,7 @@ flowchart TD
     evidenceRoute -- Yes --> generate["Model call<br/>generate cited claims"]
     evidenceRoute -- No --> canRewrite{"rewrites < max_query_rewrites?"}
     canRewrite -- Yes --> rewrite["Model call<br/>rewrite original query"]
-    rewrite --> retrieve
+    rewrite --> lexical
     canRewrite -- No --> insufficient["Clear draft<br/>return insufficient evidence"]
 
     generate --> validate["Local validation<br/>known citation IDs + claim limit"]
@@ -37,6 +44,12 @@ With the current defaults (`max_query_rewrites = 1`, `max_answer_retries = 1`), 
 makes two retrieval attempts and at most seven model calls: two evidence grades, one query rewrite,
 two answer generations, and two answer grades. Empty retrievals and structurally invalid drafts are
 rejected locally without spending another model call.
+
+The hybrid-search endpoint uses the same six retrieval nodes (`lexical_retrieve`, `embed_query`,
+`vector_retrieve`, `fuse_rrf`, `expand_context`, and `rerank_results`) and stops after reranking. The
+agentic answer endpoint continues through citation assembly and the bounded reasoning branches. Both
+paths therefore share one retrieval implementation and expose `pipeline.orchestrator =
+"langgraph-retrieval-v1"`.
 
 The browser and Business API never receive a Runpod key. Business API calls the stable
 `commonplan-generation-v1` alias with its LiteLLM credential; LiteLLM alone calls the account-owned
@@ -94,7 +107,7 @@ Use Retrieval Lab to submit a question with known indexed evidence. A successful
 
 - `generation.grounding_status = "agent_validated"`;
 - citations whose IDs are used by every returned claim;
-- `agent.strategy = "bounded-langgraph-v1"`;
+- `agent.strategy = "full-retrieval-langgraph-v2"`;
 - a bounded `agent.steps` list;
 - aggregate prompt/completion token counts;
 - `rewrites <= 1` and `answer_retries <= 1`.

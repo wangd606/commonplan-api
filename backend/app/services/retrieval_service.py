@@ -1,4 +1,4 @@
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from time import perf_counter
 from typing import Annotated, Literal
 
@@ -23,8 +23,12 @@ from app.retrieval.agentic import (
     ModelGatewayAgenticAnswerModel,
     run_agentic_answer,
 )
-from app.retrieval.fusion import postgres_lexical_rerank, reciprocal_rank_fusion
 from app.retrieval.types import RetrievalScope, SearchHit
+from app.retrieval.workflow import (
+    HybridRetrievalOptions,
+    RepositoryHybridRetrievalRuntime,
+    run_hybrid_retrieval,
+)
 from app.services.workspace_service import WorkspaceService, WorkspaceServiceDep
 
 
@@ -110,73 +114,22 @@ class RetrievalService:
         neighbor_window: int,
         include_parent: bool,
     ) -> dict:
-        started = perf_counter()
         scope = self._scope(user, workspace_id, team_ids, project_id, issue_id)
         if not scope.team_ids:
-            return self._hybrid_result(scope, None, [], [], [], {
-                "total": 0.0, "lexical": 0.0, "embedding": 0.0,
-                "vector": 0.0, "expansion_rerank": 0.0,
-            }, candidate_limit, neighbor_window, include_parent)
-
-        phase = perf_counter()
-        lexical_hits = self.repository.lexical_search(query, scope, candidate_limit)
-        lexical_ms = (perf_counter() - phase) * 1000
-
-        phase = perf_counter()
+            return self._empty_hybrid_result(
+                scope, candidate_limit, neighbor_window, include_parent,
+            )
+        runtime = self._hybrid_runtime(
+            scope,
+            limit=limit,
+            candidate_limit=candidate_limit,
+            neighbor_window=neighbor_window,
+            include_parent=include_parent,
+        )
         try:
-            vectors = self.embedding_provider.embed([query])
+            return run_hybrid_retrieval(query, runtime).retrieval
         except (httpx.HTTPError, ValueError) as exc:
-            raise RetrievalUnavailable("Query embedding is unavailable") from exc
-        if len(vectors) != 1:
-            raise RetrievalUnavailable("Query embedding returned an invalid result")
-        embedding_ms = (perf_counter() - phase) * 1000
-        profile_key = embedding_profile_key(
-            self.embedding_provider.provider,
-            self.embedding_provider.model,
-            self.embedding_provider.dimensions,
-        )
-
-        phase = perf_counter()
-        vector_hits = self.repository.vector_search(
-            vectors[0], profile_key, scope, candidate_limit
-        )
-        vector_ms = (perf_counter() - phase) * 1000
-
-        phase = perf_counter()
-        fused = reciprocal_rank_fusion(vector_hits, lexical_hits)
-        contexts = self.repository.expand_context(
-            [candidate.hit.node_id for candidate in fused],
-            scope,
-            neighbor_window,
-            include_parent,
-        )
-        bounded_contexts = {
-            node_id: [
-                replace(passage, content=self._bounded(passage.content))
-                for passage in passages
-            ]
-            for node_id, passages in contexts.items()
-        }
-        reranked = postgres_lexical_rerank(fused, bounded_contexts)[:limit]
-        expansion_ms = (perf_counter() - phase) * 1000
-        timings = {
-            "lexical": lexical_ms,
-            "embedding": embedding_ms,
-            "vector": vector_ms,
-            "expansion_rerank": expansion_ms,
-            "total": (perf_counter() - started) * 1000,
-        }
-        return self._hybrid_result(
-            scope,
-            profile_key,
-            vector_hits[:limit],
-            lexical_hits[:limit],
-            reranked,
-            timings,
-            candidate_limit,
-            neighbor_window,
-            include_parent,
-        )
+            raise RetrievalUnavailable("Hybrid retrieval is unavailable") from exc
 
     def answer(
         self,
@@ -295,25 +248,21 @@ class RetrievalService:
             raise RetrievalUnavailable("Agentic answer generation is not configured")
 
         started = perf_counter()
-
-        def retrieve(candidate_query: str) -> dict:
-            return self.hybrid_search(
-                user,
-                workspace_id,
-                query=candidate_query,
-                team_ids=team_ids,
-                project_id=project_id,
-                issue_id=issue_id,
-                limit=limit,
-                candidate_limit=candidate_limit,
-                neighbor_window=neighbor_window,
-                include_parent=include_parent,
-            )
+        scope = self._scope(user, workspace_id, team_ids, project_id, issue_id)
+        if not scope.team_ids:
+            raise RetrievalForbidden
+        runtime = self._hybrid_runtime(
+            scope,
+            limit=limit,
+            candidate_limit=candidate_limit,
+            neighbor_window=neighbor_window,
+            include_parent=include_parent,
+        )
 
         try:
             result = run_agentic_answer(
                 query=query,
-                retrieve=retrieve,
+                retrieval_runtime=runtime,
                 model=self.agentic_model,
                 max_citations=min(max_citations, settings.rag_max_citations),
                 max_claims=settings.rag_max_claims,
@@ -352,7 +301,7 @@ class RetrievalService:
             },
             "retrieval": result.retrieval,
             "agent": {
-                "strategy": "bounded-langgraph-v1",
+                "strategy": "full-retrieval-langgraph-v2",
                 "final_query": result.final_query,
                 "rewrites": result.rewrites,
                 "answer_retries": result.answer_retries,
@@ -408,36 +357,34 @@ class RetrievalService:
             "lexical_results": lexical_hits,
         }
 
-    @staticmethod
-    def _bounded(content: str, limit: int = 8000) -> str:
-        return content if len(content) <= limit else f"{content[:limit]}\n…"
-
-    @staticmethod
-    def _hybrid_result(
-        scope,
-        profile_key,
-        vector_hits,
-        lexical_hits,
-        fused_hits,
-        timings,
+    def _hybrid_runtime(
+        self,
+        scope: RetrievalScope,
+        *,
+        limit: int,
         candidate_limit,
         neighbor_window,
         include_parent,
+    ) -> RepositoryHybridRetrievalRuntime:
+        return RepositoryHybridRetrievalRuntime(
+            self.repository,
+            self.embedding_provider,
+            HybridRetrievalOptions(
+                scope=scope,
+                limit=limit,
+                candidate_limit=candidate_limit,
+                neighbor_window=neighbor_window,
+                include_parent=include_parent,
+            ),
+        )
+
+    @staticmethod
+    def _empty_hybrid_result(
+        scope: RetrievalScope,
+        candidate_limit: int,
+        neighbor_window: int,
+        include_parent: bool,
     ) -> dict:
-        fused_results = []
-        for row in fused_hits:
-            fused_results.append({
-                **asdict(row.hit),
-                "citation_target": row.hit.citation_target,
-                "rrf_score": row.rrf_score,
-                "rerank_score": row.rerank_score,
-                "final_score": row.final_score,
-                "vector_rank": row.vector_rank,
-                "lexical_rank": row.lexical_rank,
-                "vector_score": row.vector_score,
-                "lexical_score": row.lexical_score,
-                "context": [asdict(passage) for passage in row.context],
-            })
         return {
             "scope": {
                 "workspace_id": scope.workspace_id,
@@ -445,18 +392,26 @@ class RetrievalService:
                 "project_id": scope.project_id,
                 "issue_id": scope.issue_id,
             },
-            "embedding_profile_key": profile_key,
-            "vector_results": vector_hits,
-            "lexical_results": lexical_hits,
-            "fused_results": fused_results,
+            "embedding_profile_key": None,
+            "vector_results": [],
+            "lexical_results": [],
+            "fused_results": [],
             "pipeline": {
+                "orchestrator": "langgraph-retrieval-v1",
                 "fusion": "rrf-k60",
                 "reranker": "postgres-lexical-rank-v2",
                 "candidate_limit": candidate_limit,
                 "neighbor_window": neighbor_window,
                 "include_parent": include_parent,
                 "timings_ms": {
-                    key: round(value, 2) for key, value in timings.items()
+                    "lexical": 0.0,
+                    "embedding": 0.0,
+                    "vector": 0.0,
+                    "fusion": 0.0,
+                    "context": 0.0,
+                    "rerank": 0.0,
+                    "expansion_rerank": 0.0,
+                    "total": 0.0,
                 },
             },
         }

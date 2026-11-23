@@ -742,6 +742,7 @@ class HybridRetrievalHitRead(BaseModel):
 
 
 class RetrievalPipelineRead(BaseModel):
+    orchestrator: str = "langgraph-retrieval-v1"
     fusion: str
     reranker: str
     candidate_limit: int

@@ -256,9 +256,9 @@ discovery or execution.
 ## M12 — RAG ingestion and retrieval
 
 **Status:** ingestion slice implemented in KEY-11. KEY-20 R1-R4 are implemented: ACL-filtered
-channels, RRF fusion, parent/neighbor expansion, explainable local reranking, a bilingual evaluation
-contract, Retrieval Lab, bounded evidence assembly, claim-level grounded citations, and a bounded
-LangGraph answer workflow. The Runpod deployment configuration is code-complete; creating the
+channels, RRF fusion, parent/neighbor expansion, PostgreSQL lexical-score reranking, a bilingual
+evaluation contract, Retrieval Lab, bounded evidence assembly, claim-level grounded citations, and a
+full retrieval plus bounded-answer LangGraph workflow. The Runpod deployment configuration is code-complete; creating the
 account-owned endpoint and providing its secret remain deployment actions. Neural reranking remains
 pending.
 
@@ -269,11 +269,12 @@ Delivery is split into two reviewable vertical slices:
 - KEY-11 ingestion foundation: business mutations append versioned knowledge events in the same PostgreSQL transaction; Debezium captures the append-only outbox from WAL and publishes to Redpanda through the Kafka protocol. A consumer-group worker handles retries and a dead-letter topic, then routes attachments through production Docling/hybrid chunking and database records through deterministic Markdown rendering/overlapping chunks. Both paths use the pinned local Qwen embedding alias through the private model gateway and persist ACL-scoped, versioned chunks plus delete tombstones. Consumer offsets—not mutable outbox rows—own delivery progress.
 - Retrieval completion: R1 adds a 1,024-dimensional HNSW expression index, full-text/trigram lexical
   indexes, same-profile query embedding, authorization-filtered candidate queries, and separate
-  rankings for inspection. R2 adds parent-page/neighbor expansion, RRF fusion, explainable local
+  rankings for inspection. R2 adds parent-page/neighbor expansion, RRF fusion, PostgreSQL lexical-score
   reranking, a bilingual quality dataset, and the Retrieval Lab UI. R3 adds an explicit answer-provider
   boundary, deterministic local grounded answers, optional LiteLLM generation, strict citation
-  validation and citation inspection UI. R4 adds a bounded LangGraph retrieve/grade/rewrite/generate/
-  grade workflow, token and step telemetry, and a LiteLLM route to a scale-to-zero Runpod Serverless
+  validation and citation inspection UI. R4 promotes each hybrid-retrieval stage to an explicit
+  LangGraph node and continues through bounded grade/rewrite/generate/grade branches, token and step
+  telemetry, and a LiteLLM route to a scale-to-zero Runpod Serverless
   Qwen generation worker. The graph allows at most one retrieval rewrite and one answer retry by
   default; unsupported output is refused rather than returned.
 - Model access boundary: the local ingestion path now calls the separately deployed,

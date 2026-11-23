@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import json
 import operator
-from typing import Annotated, Callable, Protocol, TypedDict
+from typing import Annotated, Protocol
 
 import httpx
 from langgraph.graph import END, START, StateGraph
@@ -13,6 +13,13 @@ from app.retrieval.answering import (
     GroundedClaim,
     assemble_citations,
     validate_draft,
+)
+from app.retrieval.workflow import (
+    RETRIEVAL_ENTRY,
+    RETRIEVAL_EXIT,
+    HybridRetrievalRuntime,
+    RetrievalWorkflowNodes,
+    RetrievalWorkflowState,
 )
 
 
@@ -76,20 +83,16 @@ class AgenticAnswerModel(Protocol):
     ) -> tuple[AnswerGrade, ModelUsage]: ...
 
 
-class _AgentState(TypedDict, total=False):
+class _AgentState(RetrievalWorkflowState, total=False):
     original_query: str
-    current_query: str
     rewrites: int
     answer_retries: int
-    retrieval: dict
     citations: list[AnswerCitation]
     evidence_grade: EvidenceGrade
     draft: AnswerDraft
     answer_grade: AnswerGrade
     feedback: str | None
-    steps: Annotated[list[dict], operator.add]
     usage: Annotated[list[ModelUsage], operator.add]
-    retrieval_timings_ms: Annotated[list[float], operator.add]
 
 
 def _citation_payload(citations: list[AnswerCitation]) -> list[dict]:
@@ -263,26 +266,22 @@ class ModelGatewayAgenticAnswerModel:
 def run_agentic_answer(
     *,
     query: str,
-    retrieve: Callable[[str], dict],
+    retrieval_runtime: HybridRetrievalRuntime,
     model: AgenticAnswerModel,
     max_citations: int,
     max_claims: int,
     max_query_rewrites: int,
     max_answer_retries: int,
 ) -> AgenticAnswerResult:
-    def retrieve_node(state: _AgentState) -> dict:
-        current_query = state["current_query"]
-        retrieval = retrieve(current_query)
-        citations = assemble_citations(retrieval["fused_results"], limit=max_citations)
+    def assemble_citations_node(state: _AgentState) -> dict:
+        citations = assemble_citations(
+            state["retrieval"]["fused_results"], limit=max_citations,
+        )
         return {
-            "retrieval": retrieval,
             "citations": citations,
-            "retrieval_timings_ms": [
-                float(retrieval["pipeline"]["timings_ms"]["total"])
-            ],
             "steps": [{
-                "node": "retrieve",
-                "query": current_query,
+                "node": "assemble_citations",
+                "query": state["current_query"],
                 "attempt": state["rewrites"],
                 "decision": f"{len(citations)} citations",
             }],
@@ -322,6 +321,7 @@ def run_agentic_answer(
         return {
             "current_query": rewritten,
             "rewrites": state["rewrites"] + 1,
+            "retrieval_attempt": state["rewrites"] + 1,
             "usage": [usage],
             "steps": [{
                 "node": "rewrite_query",
@@ -398,21 +398,23 @@ def run_agentic_answer(
         }
 
     graph = StateGraph(_AgentState)
-    graph.add_node("retrieve", retrieve_node)
+    RetrievalWorkflowNodes(retrieval_runtime).add_to(graph)
+    graph.add_node("assemble_citations", assemble_citations_node)
     graph.add_node("grade_evidence", evidence_grade_node)
     graph.add_node("rewrite", rewrite_node)
     graph.add_node("generate", generate_node)
     graph.add_node("grade_answer", answer_grade_node)
     graph.add_node("retry_answer", retry_answer_node)
     graph.add_node("insufficient", insufficient_node)
-    graph.add_edge(START, "retrieve")
-    graph.add_edge("retrieve", "grade_evidence")
+    graph.add_edge(START, RETRIEVAL_ENTRY)
+    graph.add_edge(RETRIEVAL_EXIT, "assemble_citations")
+    graph.add_edge("assemble_citations", "grade_evidence")
     graph.add_conditional_edges("grade_evidence", evidence_route, {
         "generate": "generate",
         "rewrite": "rewrite",
         "insufficient": "insufficient",
     })
-    graph.add_edge("rewrite", "retrieve")
+    graph.add_edge("rewrite", RETRIEVAL_ENTRY)
     graph.add_edge("generate", "grade_answer")
     graph.add_conditional_edges("grade_answer", answer_route, {
         "final": END,
@@ -424,6 +426,7 @@ def run_agentic_answer(
     result = graph.compile().invoke({
         "original_query": query,
         "current_query": query,
+        "retrieval_attempt": 0,
         "rewrites": 0,
         "answer_retries": 0,
         "steps": [],

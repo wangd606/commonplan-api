@@ -6,6 +6,7 @@ from app.retrieval.agentic import (
     run_agentic_answer,
 )
 from app.retrieval.answering import AnswerCitation, AnswerDraft, GroundedClaim
+from app.retrieval.workflow import run_hybrid_retrieval
 
 
 def retrieval(query: str) -> dict:
@@ -22,6 +23,47 @@ def retrieval(query: str) -> dict:
         }],
         "pipeline": {"timings_ms": {"total": 12.0}},
     }
+
+
+class FakeRetrievalRuntime:
+    def __init__(self):
+        self.current_query = ""
+
+    def lexical_retrieve(self, query):
+        self.current_query = query
+        return [f"lexical:{query}"]
+
+    def embed_query(self, query):
+        return [1.0, 0.0], "test-profile"
+
+    def vector_retrieve(self, query_embedding, profile_key):
+        return [f"vector:{self.current_query}"]
+
+    def fuse(self, vector_hits, lexical_hits):
+        return [f"fused:{self.current_query}"]
+
+    def expand_context(self, candidates):
+        return {}
+
+    def rerank(self, candidates, contexts):
+        return [f"reranked:{self.current_query}"]
+
+    def build_result(
+        self, profile_key, vector_hits, lexical_hits, fused_hits, timings,
+    ):
+        result = retrieval(self.current_query)
+        result["pipeline"]["timings_ms"] = timings
+        return result
+
+
+def test_hybrid_retrieval_is_fully_orchestrated_by_langgraph():
+    result = run_hybrid_retrieval("original query", FakeRetrievalRuntime())
+
+    assert result.retrieval["fused_results"][0]["content"].endswith("original query")
+    assert [step["node"] for step in result.steps] == [
+        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
+        "expand_context", "rerank_results",
+    ]
 
 
 class RewriteThenAnswerModel:
@@ -48,7 +90,7 @@ class RewriteThenAnswerModel:
 def test_langgraph_rewrites_once_then_returns_a_graded_answer():
     result = run_agentic_answer(
         query="original query",
-        retrieve=retrieval,
+        retrieval_runtime=FakeRetrievalRuntime(),
         model=RewriteThenAnswerModel(),
         max_citations=4,
         max_claims=3,
@@ -59,10 +101,14 @@ def test_langgraph_rewrites_once_then_returns_a_graded_answer():
     assert result.final_query == "focused retrieval query"
     assert result.rewrites == 1
     assert result.answer_supported is True
-    assert result.retrieval_ms == 24.0
+    assert result.retrieval_ms > 0
     assert result.draft.claims[0].citation_ids == ("S1",)
     assert [step["node"] for step in result.steps] == [
-        "retrieve", "grade_evidence", "rewrite_query", "retrieve",
+        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
+        "expand_context", "rerank_results", "assemble_citations",
+        "grade_evidence", "rewrite_query",
+        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
+        "expand_context", "rerank_results", "assemble_citations",
         "grade_evidence", "generate_answer", "grade_answer",
     ]
     assert sum(item.total_tokens for item in result.usage) == 77
@@ -76,7 +122,7 @@ class NeverEnoughModel(RewriteThenAnswerModel):
 def test_langgraph_stops_after_the_bounded_rewrite():
     result = run_agentic_answer(
         query="unsupported",
-        retrieve=retrieval,
+        retrieval_runtime=FakeRetrievalRuntime(),
         model=NeverEnoughModel(),
         max_citations=4,
         max_claims=3,
@@ -104,7 +150,7 @@ class RetryInvalidAnswerModel(RewriteThenAnswerModel):
 def test_langgraph_retries_an_invalid_citation_once_without_exposing_it():
     result = run_agentic_answer(
         query="question",
-        retrieve=retrieval,
+        retrieval_runtime=FakeRetrievalRuntime(),
         model=RetryInvalidAnswerModel(),
         max_citations=4,
         max_claims=3,

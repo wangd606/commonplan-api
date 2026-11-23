@@ -222,6 +222,7 @@ def test_hybrid_search_fuses_channels_and_expands_context():
     assert len(result["lexical_results"]) == 1
     assert len(result["fused_results"]) == 2
     assert result["fused_results"][0]["context"][0]["relation"] == "next"
+    assert result["pipeline"]["orchestrator"] == "langgraph-retrieval-v1"
     assert result["pipeline"]["fusion"] == "rrf-k60"
     assert result["pipeline"]["reranker"] == "postgres-lexical-rank-v2"
     serialized = HybridRetrievalSearchResponse.model_validate(result).model_dump()
@@ -305,11 +306,13 @@ def test_agentic_answer_exposes_bounded_trace_and_usage(monkeypatch):
 
     assert result["generation"]["status"] == "answered"
     assert result["generation"]["grounding_status"] == "agent_validated"
-    assert result["agent"]["strategy"] == "bounded-langgraph-v1"
+    assert result["agent"]["strategy"] == "full-retrieval-langgraph-v2"
     assert result["agent"]["model_calls"] == 3
     assert result["agent"]["usage"]["total_tokens"] == 51
     assert [step["node"] for step in result["agent"]["steps"]] == [
-        "retrieve", "grade_evidence", "generate_answer", "grade_answer",
+        "lexical_retrieve", "embed_query", "vector_retrieve", "fuse_rrf",
+        "expand_context", "rerank_results", "assemble_citations",
+        "grade_evidence", "generate_answer", "grade_answer",
     ]
     GroundedAnswerResponse.model_validate(result)
 

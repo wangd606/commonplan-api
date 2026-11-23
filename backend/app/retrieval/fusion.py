@@ -4,7 +4,7 @@ from app.retrieval.types import ContextPassage, FusedHit, SearchHit
 
 
 @dataclass
-class _Candidate:
+class FusionCandidate:
     hit: SearchHit
     rrf_score: float = 0.0
     vector_rank: int | None = None
@@ -18,12 +18,12 @@ def reciprocal_rank_fusion(
     lexical_hits: list[SearchHit],
     *,
     rank_constant: int = 60,
-) -> list[_Candidate]:
+) -> list[FusionCandidate]:
     """Fuse channel ranks without pretending their raw scores are comparable."""
-    candidates: dict[str, _Candidate] = {}
+    candidates: dict[str, FusionCandidate] = {}
     for method, hits in (("vector", vector_hits), ("lexical", lexical_hits)):
         for rank, hit in enumerate(hits, start=1):
-            candidate = candidates.setdefault(hit.node_id, _Candidate(hit=hit))
+            candidate = candidates.setdefault(hit.node_id, FusionCandidate(hit=hit))
             candidate.rrf_score += 1.0 / (rank_constant + rank)
             if method == "vector":
                 candidate.vector_rank = rank
@@ -35,7 +35,7 @@ def reciprocal_rank_fusion(
 
 
 def postgres_lexical_rerank(
-    candidates: list[_Candidate],
+    candidates: list[FusionCandidate],
     contexts: dict[str, list[ContextPassage]],
 ) -> list[FusedHit]:
     """Use PostgreSQL lexical relevance to refine RRF without mixing raw channels."""

@@ -74,11 +74,12 @@ the staged implementation plan is in [`docs/implementation/milestones.md`](docs/
 The AI boundary and LiteLLM/Bifrost decision are documented separately in the
 [model-gateway decision](docs/architecture/model-gateway-decision.md). The local embedding path is
 implemented through LiteLLM. R1 exposes authorization-scoped vector and lexical candidates; R2 adds
-RRF fusion, parent/neighbor expansion, explainable local reranking, and Retrieval Lab diagnostics.
+RRF fusion, parent/neighbor expansion, PostgreSQL lexical-score reranking, and Retrieval Lab diagnostics.
 R3 now assembles bounded evidence, returns claim-level citations, rejects unknown or missing source
-IDs, and supports an explicit local extractive or LiteLLM generation provider. R4 adds a bounded
-LangGraph workflow that grades evidence, performs at most one query rewrite, generates cited claims,
-and performs at most one answer retry. The generation alias is ready to route through LiteLLM to a
+IDs, and supports an explicit local extractive or LiteLLM generation provider. R4 moves lexical
+retrieval, query embedding, vector retrieval, RRF, context expansion, reranking and citation assembly
+into explicit LangGraph nodes, then grades evidence, performs at most one query rewrite, generates
+cited claims, and performs at most one answer retry. The generation alias is ready to route through LiteLLM to a
 Runpod Serverless Qwen worker; no Runpod credential or model endpoint is committed to the repository.
 See the [R4 verification guide](docs/implementation/retrieval-r4-runpod-verification.md). Neural
 reranking and production gateway virtual keys/persistence remain later deployment work.
